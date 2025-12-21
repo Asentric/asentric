@@ -304,9 +304,9 @@ It does not:
 ### Supported Commands (v1)
 
 ```bash
-asentric init <project>
-asentric replay --fixture <file>
-asentric version
+asentric init <project>        # Generate project template
+asentric replay --fixture <file>  # Test offline
+asentric version                # Show version
 ```
 
 ### CLI Responsibilities
@@ -314,6 +314,25 @@ asentric version
 * Project scaffolding
 * Replay testing
 * Local development workflows
+
+### Generated Project Structure
+
+When you run `asentric init <project>`, it generates:
+
+```
+my-protocol-monitor/
+├── config/
+│   ├── asentric.yaml      # Engine configuration
+│   ├── registry.yaml      # Target monitoring list (1 chain per project)
+│   └── runtime.yaml        # Runtime configuration (Redis, RPC, database)
+├── rules/                   # Your security rules
+├── abi/                     # Smart contract ABIs
+└── cmd/
+    └── watcher/
+        └── main.go          # Runtime entry point (you build this)
+```
+
+**Note:** Redis is required for runtime setup (like Ponder.sh requires Postgres). See `docs/infrastructure-requirements.md` for details.
 
 ---
 
@@ -360,6 +379,28 @@ Those are handled by other repositories.
 
 ---
 
+## Repository Structure
+
+The Asentric SDK follows a monorepo structure:
+
+```
+asentric/ (or asentric-sdk/)
+├── pkg/asentric/          # Public API (STABLE)
+├── cmd/asentric/          # CLI tools
+├── cmd/runtime-reference/ # Reference runtime (example)
+├── examples/              # Examples
+├── templates/             # Project templates
+└── docs/                  # Documentation
+```
+
+**Key Points:**
+- ✅ **1 Repository (Monorepo)** - Framework + CLI + Examples + Reference Runtime
+- ✅ **Reference Runtime** - Example implementation (not required)
+- ✅ **Examples** - Real-world examples (simple-watcher, custom-rules, ml-integration)
+- ✅ **Self-hosted** - Developer builds runtime
+
+---
+
 ## Summary
 
 Asentric SDK is:
@@ -368,5 +409,9 @@ Asentric SDK is:
 * A stable contract for rule authors
 * A shared brain across runtimes
 * A strict boundary between logic and infrastructure
+* **1 Repository (Monorepo)** - Framework + CLI + Examples + Reference Runtime
+* **Self-hosted** - Developer builds runtime
+* **Redis required** - For setup (like Ponder.sh needs Postgres)
+* **Database optional** - For saving events/logs
 
 This API contract is the foundation for the entire Asentric ecosystem.

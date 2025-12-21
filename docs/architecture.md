@@ -89,32 +89,78 @@ This makes execution traceable, debuggable, and replayable.
 ## 3. High-Level Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                 Asentric SDK                     │
-│                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
-│  │  Engine  │  │  Rules   │  │ Context  │      │
-│  └──────────┘  └──────────┘  └──────────┘      │
-│         │             │             │           │
-│         └─────────────┴─────────────┘           │
-│                     │                           │
-└─────────────────────┼───────────────────────────┘
-                      │
-         ┌────────────┼────────────┐
-         │            │            │
-    ┌────▼───┐   ┌───▼────┐   ┌──▼──────┐
-    │  Bot   │   │Backend │   │Frontend │
-    │(Runtime)│  │  (API) │   │  (UI)   │
-    └────────┘   └────────┘   └─────────┘
+┌─────────────────────────────────────────────────────────────┐
+│              Asentric Framework Repository                    │
+│                                                               │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │         Framework Core (pkg/asentric)                │   │
+│  │         - Engine                                     │   │
+│  │         - Rules                                      │   │
+│  │         - Context                                    │   │
+│  │         - Alerts                                     │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                          │                                   │
+│                          │ Used by                           │
+│                          ▼                                   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │         CLI Tools (cmd/asentric)                      │   │
+│  │         - init: Generate project                     │   │
+│  │         - replay: Test offline                       │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                               │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │         Reference Runtime (cmd/runtime-reference)    │   │
+│  │         - Example implementation                     │   │
+│  │         - Not required, hanya contoh                 │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                               │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │         Examples (examples/)                         │   │
+│  │         - simple-watcher                             │   │
+│  │         - custom-rules                               │   │
+│  │         - ml-integration                             │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          │ Used by
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Developer Project (Self-Hosted)                     │
+│                                                              │
+│  my-protocol-monitor/                                       │
+│  ├── config/                                                │
+│  │   ├── asentric.yaml      # Engine config                │
+│  │   ├── registry.yaml      # Target list (1 chain)         │
+│  │   └── runtime.yaml        # Runtime config (Redis, DB)   │
+│  ├── rules/                                                 │
+│  │   ├── custom_rule.go     # Developer rules             │
+│  │   └── ml_rule.go         # Custom ML rule               │
+│  ├── abi/                                                   │
+│  └── cmd/watcher/                                           │
+│      └── main.go            # Runtime (developer buat)     │
+│                                                              │
+│  Runtime Responsibilities:                                  │
+│  - Setup Redis (required - message queue & state)           │
+│  - Connect to RPC (developer choice)                        │
+│  - Setup Database (optional - untuk save events/logs)      │
+│  - Parse config & registry                                  │
+│  - Setup engine                                             │
+│  - Register rules                                           │
+│  - Monitoring loop                                          │
+│  - Alert delivery (developer choice)                         │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 The SDK provides the **core detection logic**, while external systems handle:
 
-* **Bot**: Chain monitoring, transaction ingestion, alert routing
+* **Runtime** (Self-hosted): Chain monitoring, transaction ingestion, alert routing (developer builds)
 * **Backend**: REST API, data aggregation, persistence
 * **Frontend**: User interface, dashboards, visualization
 
 The SDK is a **closed execution box** that processes Context and produces Alerts.
+
+**Note:** Developers build their own runtime (self-hosted). The reference runtime (`cmd/runtime-reference/`) is provided as an example, not a requirement.
 
 ---
 
@@ -367,15 +413,55 @@ Exporting observability data is the runtime's responsibility.
 The Asentric SDK is designed to be embedded into multiple runtime environments:
 
 ```
-┌─────────────┐
-│  Asentric   │ ◄── Core detection logic
-│     SDK     │     (pure, reusable)
-└─────────────┘
-       │
-       ├──► Bot        (ingestion, real-time monitoring)
-       ├──► Backend    (API, aggregation, persistence)
-       ├──► CLI        (replay, testing, development)
-       └──► Lambda     (serverless detection)
+┌─────────────────────────────────────────────────────────────┐
+│              Asentric Framework Repository                    │
+│                                                               │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │         Framework Core (pkg/asentric)                │   │
+│  │         - Engine                                     │   │
+│  │         - Rules                                      │   │
+│  │         - Context                                    │   │
+│  │         - Alerts                                     │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                          │                                   │
+│                          │ Used by                           │
+│                          ▼                                   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │         CLI Tools (cmd/asentric)                      │   │
+│  │         - init: Generate project                     │   │
+│  │         - replay: Test offline                       │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                               │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │         Reference Runtime (cmd/runtime-reference)    │   │
+│  │         - Example implementation                     │   │
+│  │         - Not required, hanya contoh                 │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                               │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │         Examples (examples/)                         │   │
+│  │         - simple-watcher                             │   │
+│  │         - custom-rules                               │   │
+│  │         - ml-integration                             │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          │ Used by
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Developer Project (Self-Hosted)                     │
+│                                                              │
+│  Runtime Responsibilities:                                  │
+│  - Setup Redis (required - message queue & state)           │
+│  - Connect to RPC (developer choice)                        │
+│  - Setup Database (optional - untuk save events/logs)      │
+│  - Parse config & registry                                  │
+│  - Setup engine                                             │
+│  - Register rules                                           │
+│  - Monitoring loop                                          │
+│  - Alert delivery (developer choice)                         │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### Component Roles
@@ -383,31 +469,66 @@ The Asentric SDK is designed to be embedded into multiple runtime environments:
 | Component | Role | Uses SDK For |
 |-----------|------|--------------|
 | **SDK** | Security logic & detection | N/A (core library) |
-| **Bot** | Chain ingestion & alert delivery | Rule execution, alert generation |
+| **Runtime** | Self-hosted watcher (developer builds) | Rule execution, alert generation |
 | **Backend** | API, aggregation, persistence | Alert processing, historical analysis |
 | **Frontend** | Visualization & dashboard | N/A (consumes Backend API) |
 | **CLI** | Development & testing tools (not a runtime) | Replay, rule validation |
+| **Reference Runtime** | Example implementation | Reference for developers (not required) |
 
 The SDK remains the **single source of truth** for security detection logic.
 
+**Note:** Developers build their own runtime (self-hosted). The reference runtime (`cmd/runtime-reference/`) is provided as an example, not a requirement.
+
 ---
 
-## 10. Architectural Non-Goals
+## 10. Infrastructure Requirements
+
+### Required: Redis (Setup Awal)
+
+**Like Ponder.sh requires Postgres, Asentric requires Redis for:**
+- ✅ Message queue (watcher → processor)
+- ✅ State management (processed blocks)
+- ✅ Worker coordination (multi-worker)
+- ✅ Alert queue (processor → alert handler)
+
+**Setup:**
+```bash
+docker run -d -p 6379:6379 --name redis redis:7-alpine
+```
+
+### Optional: Database (Save Events/Logs)
+
+**You can choose a database for:**
+- ⚠️ Saving events/transactions/logs
+- ⚠️ Historical data storage
+- ⚠️ Analytics & reporting
+
+**Options:**
+- PostgreSQL (relational)
+- MongoDB (document)
+- InfluxDB (time-series)
+- ClickHouse (analytics)
+
+**See full documentation:** `docs/infrastructure-requirements.md`
+
+---
+
+## 11. Architectural Non-Goals
 
 The following will **never** be added to the SDK:
 
 * RPC clients
-* Redis / Kafka clients
 * HTTP servers
-* Databases
 * Alert delivery
 * Deployment tooling
+
+**Note:** While Redis is required for runtime setup (like Ponder.sh requires Postgres), the SDK itself does not include Redis clients. Redis is used by runtime systems (developer-built) for message queue and state management.
 
 If a feature requires infrastructure, it does not belong here.
 
 ---
 
-## 11. Summary
+## 12. Summary
 
 Asentric SDK is:
 
@@ -415,6 +536,10 @@ Asentric SDK is:
 * Infrastructure-agnostic
 * Deterministic and testable
 * Designed for embedding
+* **1 Repository (Monorepo)** - Framework + CLI + Examples + Reference Runtime
+* **Self-hosted** - Developer builds runtime
+* **Redis required** - For setup (like Ponder.sh needs Postgres)
+* **Database optional** - For saving events/logs
 
 It exists to make **security logic simple, safe, and reusable**.
 

@@ -132,14 +132,23 @@ The SDK provides the **core detection logic**, while external systems handle:
 ### Prerequisites
 
 - Go 1.21 or higher
+- Redis 7+ (required for setup - like Ponder.sh requires Postgres)
 - Basic understanding of blockchain transactions and smart contracts
 
 ### Installation
 
-Install the SDK using Go modules:
+Install the CLI tool:
 
 ```bash
-go get github.com/asentric/asentric-sdk
+go install github.com/asentric/asentric@latest
+```
+
+### Setup Redis (Required)
+
+Like Ponder.sh requires Postgres for setup, Asentric requires Redis for message queue and state management:
+
+```bash
+docker run -d -p 6379:6379 --name redis redis:7-alpine
 ```
 
 ### Scaffold a New Project
@@ -147,46 +156,56 @@ go get github.com/asentric/asentric-sdk
 Create a new detection project with the CLI:
 
 ```bash
-asentric init my-asentric-protocol
-cd my-asentric-protocol
+asentric init my-protocol-monitor
+cd my-protocol-monitor
 go mod tidy
 ```
 
 This generates a complete project structure:
 
 ```
-my-asentric-protocol/
-├── cmd/
-│   └── watcher/
-│       └── main.go          # Entry point
+my-protocol-monitor/
+├── config/
+│   ├── asentric.yaml      # Engine configuration
+│   ├── registry.yaml      # Target monitoring list (1 chain per project)
+│   └── runtime.yaml        # Runtime configuration (Redis, RPC, database)
 ├── rules/                   # Your security rules
 ├── abi/                     # Smart contract ABIs
-├── config/
-│   └── asentric.yaml        # Configuration
-└── README.md
+└── cmd/
+    └── watcher/
+        └── main.go          # Runtime entry point (you build this)
 ```
 
-### Initialize the Engine
+### Initialize the Runtime
 
-In your `main.go`:
+In your `cmd/watcher/main.go`:
 
 ```go
 package main
 
 import (
-    "github.com/asentric/asentric-sdk/pkg/asentric"
+    "github.com/asentric/asentric/pkg/asentric"
+    "github.com/go-redis/redis/v8"
 )
 
 func main() {
-    // Create a new detection engine
-    engine := asentric.NewEngine()
+    // 1. Setup Redis (required - like Ponder.sh needs Postgres)
+    redisClient := redis.NewClient(&redis.Options{
+        Addr: "localhost:6379",
+    })
     
-    // Register your security rules
+    // 2. Setup engine
+    engine := asentric.NewEngine()
     engine.RegisterRule(&LargeSwapRule{})
     engine.RegisterRule(&SuspiciousTransferRule{})
     
-    // Process transactions (context provided by runtime)
-    // engine.Process(ctx)
+    // 3. Setup Database (optional - for saving events/logs)
+    // var db *gorm.DB
+    // if config.Database.Enabled { ... }
+    
+    // 4. Start monitoring (you implement this)
+    watcher := NewWatcher(engine, redisClient)
+    watcher.Start()
 }
 ```
 
@@ -355,20 +374,61 @@ Replay fixtures are JSON files containing transaction data:
 
 ---
 
+## Infrastructure Requirements
+
+### Required: Redis (Setup Awal)
+
+**Like Ponder.sh requires Postgres, Asentric requires Redis for:**
+- ✅ Message queue (watcher → processor)
+- ✅ State management (processed blocks)
+- ✅ Worker coordination (multi-worker)
+- ✅ Alert queue (processor → alert handler)
+
+**Setup:**
+```bash
+docker run -d -p 6379:6379 --name redis redis:7-alpine
+```
+
+### Optional: Database (Save Events/Logs)
+
+**You can choose a database for:**
+- ⚠️ Saving events/transactions/logs
+- ⚠️ Historical data storage
+- ⚠️ Analytics & reporting
+
+**Options:**
+- PostgreSQL (relational)
+- MongoDB (document)
+- InfluxDB (time-series)
+- ClickHouse (analytics)
+
+**See full documentation:** `docs/infrastructure-requirements.md`
+
+---
+
 ## Ecosystem Integration
 
 The Asentric SDK is designed to be embedded into multiple runtime environments:
 
 ```
-┌─────────────┐
-│  Asentric   │ ◄── Core detection logic
-│     SDK     │     (pure, reusable)
-└─────────────┘
-       │
-       ├──► Bot        (ingestion, real-time monitoring)
-       ├──► Backend    (API, aggregation, persistence)
-       ├──► CLI        (replay, testing, development)
-       └──► Lambda     (serverless detection)
+┌─────────────────────────────────────────────────┐
+│              Asentric Framework                  │
+│                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │  Engine  │  │  Rules   │  │ Context  │      │
+│  └──────────┘  └──────────┘  └──────────┘      │
+│         │             │             │           │
+│         └─────────────┴─────────────┘           │
+│                     │                           │
+└─────────────────────┼───────────────────────────┘
+                      │
+         ┌────────────┼────────────┐
+         │            │            │
+    ┌────▼───┐   ┌───▼────┐   ┌──▼──────┐
+    │Runtime │   │Backend │   │Frontend │
+    │(Self-  │   │  (API) │   │  (UI)   │
+    │hosted) │   │        │   │         │
+    └────────┘   └────────┘   └─────────┘
 ```
 
 ### Component Roles
@@ -376,49 +436,69 @@ The Asentric SDK is designed to be embedded into multiple runtime environments:
 | Component | Role | Uses SDK For |
 |-----------|------|--------------|
 | **SDK** | Security logic & detection | N/A (core library) |
-| **Bot** | Chain ingestion & alert delivery | Rule execution, alert generation |
+| **Runtime** | Self-hosted watcher (developer builds) | Rule execution, alert generation |
 | **Backend** | API, aggregation, persistence | Alert processing, historical analysis |
 | **Frontend** | Visualization & dashboard | N/A (consumes Backend API) |
 | **CLI** | Development & testing tools (not a runtime) | Replay, rule validation |
+| **Reference Runtime** | Example implementation | Reference for developers (not required) |
 
 **The SDK remains the single source of truth for security detection logic.**
+
+**Note:** Developers build their own runtime (self-hosted). The reference runtime (`cmd/runtime-reference/`) is provided as an example, not a requirement.
 
 ---
 
 ## Repository Structure
 
 ```
-asentric-sdk/
-├── cmd/
-│   └── asentric/              # CLI tools (init, replay)
-│       └── main.go
-│
+asentric/ (or asentric-sdk/)
 ├── pkg/
 │   └── asentric/              # PUBLIC SDK API (STABLE)
 │       ├── engine.go          # Detection engine
 │       ├── rule.go            # Rule interface
 │       ├── context.go         # Execution context
 │       ├── alert.go           # Alert model
-│       └── config.go          # SDK configuration
+│       └── ...
 │
 ├── internal/                  # PRIVATE SDK IMPLEMENTATION
 │   ├── runtime/               # Engine runtime loop
 │   ├── rule/                  # Rule registry & executor
 │   ├── chain/                 # Chain data models & helpers
-│   ├── abi/                   # ABI loading & decoding
+│   ├── abi/                   # ABI loading & decoding (internal only)
 │   ├── alert/                 # Alert formatting & envelope
 │   └── observability/         # Internal execution metrics & diagnostics
 │
+├── cmd/
+│   ├── asentric/              # CLI tools (init, replay, version)
+│   │   ├── init.go
+│   │   ├── replay.go
+│   │   └── version.go
+│   │
+│   └── runtime-reference/    # Reference Runtime (Example)
+│       └── main.go            # Example runtime implementation
+│
 ├── templates/
 │   └── project/               # Project templates for `asentric init`
+│       ├── config/
+│       │   ├── asentric.yaml
+│       │   ├── registry.yaml
+│       │   └── runtime.yaml
+│       ├── rules/
+│       └── cmd/watcher/
 │
 ├── examples/
-│   └── simple-watcher/        # Minimal SDK usage example
+│   ├── simple-watcher/        # Minimal runtime example
+│   ├── custom-rules/          # Example custom rules
+│   ├── ml-integration/        # Example ML rule
+│   └── multi-chain/          # Example multi-chain setup
 │
 ├── docs/
-│   ├── architecture.md        # Architecture deep dive
-│   ├── sdk-api.md             # Complete API reference
-│   └── cli.md                 # CLI documentation
+│   ├── architecture.md                    # Architecture deep dive
+│   ├── sdk-api.md                        # Complete API reference
+│   ├── final-architecture-recommendation.md  # Final architecture decision
+│   ├── developer-experience.md           # Developer experience guide
+│   ├── infrastructure-requirements.md   # Infrastructure setup guide
+│   └── migration-roadmap.md              # Migration strategy
 │
 ├── go.mod
 ├── go.sum
@@ -431,10 +511,40 @@ asentric-sdk/
 - **`pkg/asentric/`** — Public, stable SDK API used by developers
 - **`internal/`** — Private implementation details, subject to change
 - **`cmd/asentric/`** — CLI tools for scaffolding and testing (not a runtime)
+- **`cmd/runtime-reference/`** — Reference runtime example (not required, just a reference)
 - **`templates/`** — Project templates for quick start
 - **`examples/`** — Working examples demonstrating SDK usage
 
 **Observability Note:** Observability in the SDK is limited to internal execution metrics and diagnostics (e.g., rule execution timing, performance counters). Exporting metrics or logs to external systems (Prometheus, OpenTelemetry, etc.) is the responsibility of the runtime.
+
+---
+
+## Comparison with Ponder.sh
+
+| Aspect | Ponder.sh | Asentric |
+|--------|-----------|----------|
+| **Repository** | 1 repo (monorepo) | ✅ 1 repo (monorepo) |
+| **Framework** | ✅ Core framework | ✅ Core framework |
+| **CLI** | ✅ CLI tools | ✅ CLI tools |
+| **Examples** | ✅ Examples | ✅ Examples |
+| **Runtime** | Managed (Ponder) | Self-hosted (developer) |
+| **Required Infrastructure** | Postgres (setup awal) | Redis (setup awal) |
+| **Optional Infrastructure** | Database untuk data | Database untuk events/logs |
+| **Deployment** | Push to Ponder | Self-hosted |
+| **Open Source** | ✅ | ✅ |
+
+**Similarities:**
+- ✅ 1 repo (monorepo)
+- ✅ Framework + CLI + Examples
+- ✅ Developer experience focus
+- ✅ Required infrastructure untuk setup awal
+- ✅ Optional database untuk data storage
+
+**Differences:**
+- ⚠️ Ponder.sh: Managed infrastructure
+- ⚠️ Asentric: Self-hosted (developer choice)
+- ⚠️ Ponder.sh: Postgres required (state management)
+- ⚠️ Asentric: Redis required (message queue & state management)
 
 ---
 
@@ -445,7 +555,6 @@ We're continuously improving Asentric SDK. Upcoming features include:
 - [ ] **Rule Grouping & Tagging** — Organize rules by protocol, risk level, or category
 - [ ] **Multi-Chain Support** — Built-in support for EVM-compatible chains
 - [ ] **Enhanced ABI Decoding** — Automatic event decoding and type safety
-- [ ] **Community Rule Registry** — Shared library of open-source detection rules
 - [ ] **Advanced Replay Features** — Time-travel debugging and batch replay
 - [ ] **Performance Profiling** — Built-in rule performance analysis
 
