@@ -1,11 +1,13 @@
 # Asentric SDK – API Reference
 
+> **📖 Lihat alur developer:** [developer-overview.md](developer-overview.md) - Alur end-to-end penggunaan Asentric SDK
+
 This document defines the public, stable API contract of the Asentric SDK.
 
 It is intended for:
 
 * SDK users (rule authors)
-* Runtime implementers (asentric-bot)
+* Runtime implementers (developer-built, self-hosted)
 * Backend consumers
 * Future contributors
 
@@ -30,12 +32,23 @@ This document only covers public API.
 At a high level, the SDK consists of:
 
 * **Engine** — orchestrates rule execution
-* **Rule** — pure detection logic
+* **Rule** — pure detection logic (Go code, bukan config)
 * **Context** — immutable execution data
 * **Alert** — semantic detection output
 * **Severity** — strict classification enum
 
 The SDK does not handle infrastructure concerns such as RPC, queues, databases, or delivery.
+
+### Developer Flow
+
+1. **Setup Redis** (required - seperti Ponder.sh butuh Postgres)
+2. **Install & init project** (`asentric init`)
+3. **Konfigurasi YAML** (asentric.yaml, registry.yaml, runtime.yaml)
+4. **Tulis custom rules** (Go code)
+5. **Setup runtime** (cmd/watcher/main.go)
+6. **Test & run** (replay offline, kemudian run runtime)
+
+> **📖 Lihat detail:** [developer-overview.md](developer-overview.md)
 
 ---
 
@@ -332,7 +345,7 @@ my-protocol-monitor/
         └── main.go          # Runtime entry point (you build this)
 ```
 
-**Note:** Redis is required for runtime setup (like Ponder.sh requires Postgres). See `docs/infrastructure-requirements.md` for details.
+**Note:** Redis is required for runtime setup (like Ponder.sh requires Postgres). See [developer-overview.md](developer-overview.md#1-setup-infrastructure--instalasi) for details.
 
 ---
 

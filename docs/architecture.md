@@ -1,16 +1,27 @@
 # Architecture – Asentric SDK
 
+> **📖 Lihat alur developer:** [developer-overview.md](developer-overview.md) - Alur end-to-end penggunaan Asentric SDK
+
 ## 1. Purpose & Scope
 
-Asentric SDK is a **pure security detection engine** for blockchain systems.
+Asentric SDK adalah **framework untuk real-time smart contract security monitoring** yang memungkinkan developer:
 
-Its sole responsibility is to:
+* Mendefinisikan **apa yang dimonitor** melalui konfigurasi YAML
+* Menulis **logic deteksi sendiri** melalui custom rules (Go)
+* Menjalankan engine secara lokal atau di runtime mana pun
+* Menghasilkan alert yang bersifat semantik dan deterministik
+
+Asentric **bukan SaaS**, dan **bukan rule-engine berbasis YAML**. Asentric adalah **SDK + runtime pattern**.
+
+### Tanggung Jawab SDK
+
+SDK bertanggung jawab untuk:
 
 * Execute deterministic security rules
 * Process structured on-chain data
 * Produce structured alerts
 
-The SDK intentionally **does not**:
+SDK **tidak** bertanggung jawab untuk:
 
 * Fetch blockchain data
 * Run long-lived watchers
@@ -18,15 +29,28 @@ The SDK intentionally **does not**:
 * Deliver alerts
 * Manage configuration, deployment, or infrastructure
 
-These concerns are delegated to external systems (e.g. `asentric-bot`, `asentric-backend`).
+Tanggung jawab ini didelegasikan ke runtime (developer-built, self-hosted).
 
-The SDK is designed to be **embedded**, not deployed.
+SDK dirancang untuk **embedded**, bukan deployed.
 
 ---
 
 ## 2. Architectural Philosophy
 
-### 2.1 Pure Domain Core
+### 2.1 Filosofi Desain
+
+Asentric dibangun dengan prinsip berikut:
+
+* **YAML untuk konfigurasi, bukan logic** — Config hanya untuk setup engine & target list
+* **Rules adalah code, bukan config** — Semua logic deteksi ditulis dalam Go
+* **Engine deterministic & stateless** — Same input selalu menghasilkan same output
+* **Runtime bertanggung jawab atas side-effect** — RPC, database, alert delivery
+* **Developer bebas menentukan kompleksitas rules** — Dari simple threshold hingga ML integration
+* **Redis required** (seperti Ponder.sh butuh Postgres) — Untuk message queue & state management
+* **Database optional** (untuk save events/logs) — Developer choice
+* **1 project = 1 chain** (chain agnostic, tapi fokus 1 chain)
+
+### 2.2 Pure Domain Core
 
 At its core, Asentric SDK follows a **pure domain logic** philosophy:
 
@@ -141,7 +165,7 @@ This makes execution traceable, debuggable, and replayable.
 │      └── main.go            # Runtime (developer buat)     │
 │                                                              │
 │  Runtime Responsibilities:                                  │
-│  - Setup Redis (required - message queue & state)           │
+│  - Load runtime config (framework handle Redis client)       │
 │  - Connect to RPC (developer choice)                        │
 │  - Setup Database (optional - untuk save events/logs)      │
 │  - Parse config & registry                                  │
@@ -319,7 +343,6 @@ Contains:
 * Rule execution internals
 * Runtime helpers
 * ABI decoding logic
-* Internal observability
 
 External systems must never import from `internal/`.
 
@@ -388,26 +411,6 @@ The SDK **never fetches historical data**.
 
 ---
 
-## 8. Observability Scope
-
-Observability inside the SDK is **strictly internal**.
-
-Includes:
-
-* Rule execution timing
-* Rule evaluation counts
-* Engine diagnostics
-
-Excludes:
-
-* Metrics exporters
-* Tracing backends
-* Logging pipelines
-
-Exporting observability data is the runtime's responsibility.
-
----
-
 ## 9. Ecosystem Integration
 
 The Asentric SDK is designed to be embedded into multiple runtime environments:
@@ -453,7 +456,7 @@ The Asentric SDK is designed to be embedded into multiple runtime environments:
 │         Developer Project (Self-Hosted)                     │
 │                                                              │
 │  Runtime Responsibilities:                                  │
-│  - Setup Redis (required - message queue & state)           │
+│  - Load runtime config (framework handle Redis client)       │
 │  - Connect to RPC (developer choice)                        │
 │  - Setup Database (optional - untuk save events/logs)      │
 │  - Parse config & registry                                  │
@@ -509,7 +512,7 @@ docker run -d -p 6379:6379 --name redis redis:7-alpine
 - InfluxDB (time-series)
 - ClickHouse (analytics)
 
-**See full documentation:** `docs/infrastructure-requirements.md`
+**Lihat detail:** [developer-overview.md](developer-overview.md#1-setup-infrastructure--instalasi)
 
 ---
 
@@ -522,7 +525,7 @@ The following will **never** be added to the SDK:
 * Alert delivery
 * Deployment tooling
 
-**Note:** While Redis is required for runtime setup (like Ponder.sh requires Postgres), the SDK itself does not include Redis clients. Redis is used by runtime systems (developer-built) for message queue and state management.
+**Note:** While Redis is required for runtime setup (like Ponder.sh requires Postgres), framework yang handle Redis client connection. Developer hanya perlu konfigurasi di `runtime.yaml`, dan framework otomatis connect ke Redis berdasarkan config.
 
 If a feature requires infrastructure, it does not belong here.
 

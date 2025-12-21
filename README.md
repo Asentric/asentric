@@ -11,9 +11,16 @@ Asentric SDK provides a pure execution engine, rule system, and explicit runtime
 
 ## Overview
 
-Asentric SDK is designed to be the **shared security brain** of the Asentric ecosystem. It provides a pure, infrastructure-agnostic layer for defining security detection logic that can be embedded into multiple runtime environments.
+Asentric SDK adalah **framework untuk real-time smart contract security monitoring** yang memungkinkan developer:
 
-The SDK separates security logic from infrastructure concerns, allowing developers to focus on writing effective detection rules while infrastructure systems handle deployment, ingestion, and alert delivery.
+* Mendefinisikan **apa yang dimonitor** melalui konfigurasi YAML
+* Menulis **logic deteksi sendiri** melalui custom rules (Go)
+* Menjalankan engine secara lokal atau di runtime mana pun
+* Menghasilkan alert yang bersifat semantik dan deterministik
+
+Asentric **bukan SaaS**, dan **bukan rule-engine berbasis YAML**. Asentric adalah **SDK + runtime pattern** dengan developer experience seperti Ponder.sh.
+
+> **🚀 Mulai dari sini:** [docs/developer-overview.md](docs/developer-overview.md) - Alur end-to-end developer
 
 ---
 
@@ -132,28 +139,26 @@ The SDK provides the **core detection logic**, while external systems handle:
 ### Prerequisites
 
 - Go 1.21 or higher
-- Redis 7+ (required for setup - like Ponder.sh requires Postgres)
+- Redis 7+ (required for setup - seperti Ponder.sh butuh Postgres)
 - Basic understanding of blockchain transactions and smart contracts
 
-### Installation
+### 1. Setup Redis (Required)
 
-Install the CLI tool:
-
-```bash
-go install github.com/asentric/asentric@latest
-```
-
-### Setup Redis (Required)
-
-Like Ponder.sh requires Postgres for setup, Asentric requires Redis for message queue and state management:
+Seperti Ponder.sh memerlukan Postgres untuk setup awal, Asentric memerlukan Redis untuk message queue dan state management:
 
 ```bash
 docker run -d -p 6379:6379 --name redis redis:7-alpine
 ```
 
-### Scaffold a New Project
+### 2. Install CLI
 
-Create a new detection project with the CLI:
+```bash
+go install github.com/asentric/asentric@latest
+```
+
+### 3. Inisialisasi Project
+
+Buat project baru dengan CLI:
 
 ```bash
 asentric init my-protocol-monitor
@@ -161,7 +166,7 @@ cd my-protocol-monitor
 go mod tidy
 ```
 
-This generates a complete project structure:
+Ini akan menghasilkan struktur project standar:
 
 ```
 my-protocol-monitor/
@@ -169,66 +174,69 @@ my-protocol-monitor/
 │   ├── asentric.yaml      # Engine configuration
 │   ├── registry.yaml      # Target monitoring list (1 chain per project)
 │   └── runtime.yaml        # Runtime configuration (Redis, RPC, database)
-├── rules/                   # Your security rules
-├── abi/                     # Smart contract ABIs
-└── cmd/
-    └── watcher/
-        └── main.go          # Runtime entry point (you build this)
+├── rules/
+│   ├── large_swap.go      # Custom rule
+│   └── upgrade.go         # Custom rule
+├── abi/
+│   └── contracts.json     # Contract ABIs
+├── cmd/
+│   └── watcher/
+│       └── main.go        # Runtime entry point (you build this)
+└── fixtures/
+    └── example_tx.json     # Example fixture for replay
 ```
 
-### Initialize the Runtime
+### 4. Konfigurasi YAML
 
-In your `cmd/watcher/main.go`:
-
-```go
-package main
-
-import (
-    "github.com/asentric/asentric/pkg/asentric"
-    "github.com/go-redis/redis/v8"
-)
-
-func main() {
-    // 1. Setup Redis (required - like Ponder.sh needs Postgres)
-    redisClient := redis.NewClient(&redis.Options{
-        Addr: "localhost:6379",
-    })
-    
-    // 2. Setup engine
-    engine := asentric.NewEngine()
-    engine.RegisterRule(&LargeSwapRule{})
-    engine.RegisterRule(&SuspiciousTransferRule{})
-    
-    // 3. Setup Database (optional - for saving events/logs)
-    // var db *gorm.DB
-    // if config.Database.Enabled { ... }
-    
-    // 4. Start monitoring (you implement this)
-    watcher := NewWatcher(engine, redisClient)
-    watcher.Start()
-}
+**config/asentric.yaml** - Engine behavior:
+```yaml
+engine:
+  enabled_rules:
+    - large_swap_detection
+    - suspicious_transfer
+  
+  rule_options:
+    large_swap_detection:
+      threshold: "1000000000000000000"  # 1 ETH in wei
+  
+  execution:
+    max_rules_per_context: 100
+    timeout_ms: 5000
 ```
 
----
-
-## Writing Security Rules
-
-Security rules implement a simple interface:
-
-```go
-type Rule interface {
-    Name() string
-    Evaluate(ctx Context) (*Alert, error)
-}
+**config/registry.yaml** - Target monitoring (1 chain per project):
+```yaml
+targets:
+  contracts:
+    - address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+      name: "Uniswap V3 Router"
+      abi_path: "abi/uniswap_v3_router.json"
+      enabled: true
 ```
 
-### Example: Large Swap Detection
+**config/runtime.yaml** - Infrastructure runtime:
+```yaml
+runtime:
+  redis:
+    addr: "localhost:6379"
+  
+  rpc:
+    endpoint: "https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
+  
+  database:
+    enabled: false  # Optional - untuk save events/logs
+    type: "postgres"
+```
+
+### 5. Tulis Custom Rules
 
 ```go
+// rules/large_swap.go
 package rules
 
 import (
-    "github.com/asentric/asentric-sdk/pkg/asentric"
+    "math/big"
+    "github.com/asentric/asentric/pkg/asentric"
 )
 
 type LargeSwapRule struct{}
@@ -238,11 +246,9 @@ func (r *LargeSwapRule) Name() string {
 }
 
 func (r *LargeSwapRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
-    // Access transaction data from context
     tx := ctx.Tx()
+    threshold := big.NewInt(1000000000000000000) // 1 ETH
     
-    // Define detection logic
-    threshold := big.NewInt(1000)
     if tx.Value().Cmp(threshold) > 0 {
         return &asentric.Alert{
             Severity:    asentric.High,
@@ -252,83 +258,107 @@ func (r *LargeSwapRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) 
                 "value":     tx.Value().String(),
                 "threshold": threshold.String(),
             },
-            // Note: Ref (tx_hash, block_number) is populated by the engine, not by rules
+            // Note: Ref (tx_hash, block_number) is populated by engine
         }, nil
     }
     
-    // No alert — transaction is normal
     return nil, nil
 }
 ```
 
-### Key Principles for Rules
+### 6. Setup Runtime
 
-1. **Pure Functions** — No side effects, no external I/O
-2. **Context-Based Data** — All transaction data comes from `Context`
-3. **Explicit Returns** — Return `nil` when no alert is needed
-4. **Structured Alerts** — Use the `Alert` struct for consistency
-5. **Error Handling** — Return errors for processing failures, not detection misses
+```go
+// cmd/watcher/main.go
+package main
 
-### Alert Structure
+import (
+    "github.com/asentric/asentric/pkg/asentric"
+)
 
-Alerts may include a minimal execution reference (transaction hash and block number) for debugging and traceability. This reference is:
+func main() {
+    // 1. Load runtime config (Redis config ada di runtime.yaml)
+    config := loadRuntimeConfig("config/runtime.yaml")
+    
+    // 2. Setup engine
+    engine := asentric.NewEngine()
+    engine.RegisterRule(&LargeSwapRule{})
+    
+    // 3. Setup Database (optional - untuk save events/logs)
+    // var db *gorm.DB
+    // if config.Database.Enabled { ... }
+    
+    // 4. Start monitoring (framework handle Redis client)
+    watcher := asentric.NewWatcher(engine, config)
+    watcher.Start()
+}
+```
 
-* **Populated by the engine**, not by rules
-* **Informational only** — does not imply routing, persistence, or delivery responsibility
-* **Optional** — rules do not need to (and cannot) set it
+**Catatan:** Framework yang handle Redis client. Developer hanya perlu:
+- Setup Redis server (docker)
+- Konfigurasi di `runtime.yaml`
+- Framework otomatis connect ke Redis berdasarkan config
 
-The `ExecutionRef` contains only `tx_hash` and `block_number`. It does not include chain identity, network information, or RPC endpoints. Chain identity remains the responsibility of runtime systems.
+### 7. Test & Run
+
+```bash
+# Test offline dengan replay
+asentric replay --fixture fixtures/example_tx.json
+
+# Run runtime
+go run cmd/watcher/main.go
+```
+
+> **📖 Lihat alur lengkap:** [docs/developer-overview.md](docs/developer-overview.md)
 
 ---
 
-## Testing Rules
+## Filosofi Desain
 
-Rules are easy to test because they're pure functions with no external dependencies:
+Asentric dibangun dengan prinsip berikut:
+
+* **YAML untuk konfigurasi, bukan logic** — Config hanya untuk setup engine & target list
+* **Rules adalah code, bukan config** — Semua logic deteksi ditulis dalam Go
+* **Engine deterministic & stateless** — Same input selalu menghasilkan same output
+* **Runtime bertanggung jawab atas side-effect** — RPC, database, alert delivery
+* **Developer bebas menentukan kompleksitas rules** — Dari simple threshold hingga ML integration
+* **Redis required** (seperti Ponder.sh butuh Postgres) — Untuk message queue & state management
+* **Database optional** (untuk save events/logs) — Developer choice
+* **1 project = 1 chain** (chain agnostic, tapi fokus 1 chain)
+
+Pendekatan ini membuat Asentric:
+* Mudah dipelajari
+* Mudah dites
+* Mudah di-debug
+* Tidak cepat mentok untuk use case kompleks
+
+---
+
+## Testing & Replay
+
+Developer dapat test rules secara offline tanpa infrastructure:
+
+```bash
+asentric replay --fixture fixtures/example_tx.json
+```
+
+Replay mode:
+* **No External Dependencies** — Runs completely offline
+* **Deterministic** — Same input always produces same output
+* **Safe Iteration** — Test rule changes without affecting production
+
+Rules mudah di-test karena pure functions tanpa external dependencies:
 
 ```go
-package rules
-
-import (
-    "math/big"
-    "testing"
-    
-    "github.com/asentric/asentric-sdk/pkg/asentric"
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/require"
-)
-
 func TestLargeSwapRule_TriggersOnLargeValue(t *testing.T) {
-    // Arrange
-    ctx := mockContextWithValue(big.NewInt(2000))
+    ctx := mockContextWithValue(big.NewInt(2000000000000000000)) // 2 ETH
     rule := &LargeSwapRule{}
     
-    // Act
     alert, err := rule.Evaluate(ctx)
     
-    // Assert
     require.NoError(t, err)
     require.NotNil(t, alert)
     assert.Equal(t, asentric.High, alert.Severity)
-}
-
-func TestLargeSwapRule_NoAlertOnSmallValue(t *testing.T) {
-    // Arrange
-    ctx := mockContextWithValue(big.NewInt(500))
-    rule := &LargeSwapRule{}
-    
-    // Act
-    alert, err := rule.Evaluate(ctx)
-    
-    // Assert
-    require.NoError(t, err)
-    assert.Nil(t, alert, "No alert should be generated for small values")
-}
-
-// Helper function to create test contexts
-func mockContextWithValue(value *big.Int) asentric.Context {
-    return asentric.NewMockContext(
-        asentric.WithTxValue(value),
-    )
 }
 ```
 
@@ -336,41 +366,6 @@ func mockContextWithValue(value *big.Int) asentric.Context {
 
 ---
 
-## Replay Mode
-
-Asentric SDK supports **offline, deterministic replay** for debugging and testing.
-
-### Running Replay
-
-```bash
-asentric replay --fixture fixtures/suspicious_tx.json
-```
-
-### Replay Guarantees
-
-- **No External Dependencies** — Runs completely offline
-- **Deterministic** — Same input always produces same output
-- **Safe Iteration** — Test rule changes without affecting production
-- **Historical Analysis** — Replay past transactions to validate detection logic
-
-### Creating Replay Fixtures
-
-Replay fixtures are JSON files containing transaction data:
-
-```json
-{
-  "chain_id": 1,
-  "block_number": 12345678,
-  "tx_hash": "0xabc...",
-  "from": "0x123...",
-  "to": "0x456...",
-  "value": "1000000000000000000",
-  "data": "0x...",
-  "logs": [...]
-}
-```
-
-> **Important:** The SDK will never fetch historical data by itself. Fetching live transaction data from RPC nodes is the responsibility of runtime systems (e.g., `asentric-bot`), not the SDK.
 
 ---
 
@@ -402,7 +397,7 @@ docker run -d -p 6379:6379 --name redis redis:7-alpine
 - InfluxDB (time-series)
 - ClickHouse (analytics)
 
-**See full documentation:** `docs/infrastructure-requirements.md`
+**Lihat detail:** [docs/developer-overview.md](docs/developer-overview.md#1-setup-infrastructure--instalasi)
 
 ---
 
@@ -450,40 +445,53 @@ The Asentric SDK is designed to be embedded into multiple runtime environments:
 
 ## Repository Structure
 
+> **📖 Lihat struktur detail:** [docs/project-structure.md](docs/project-structure.md) - Struktur folder & file final (authoritative)
+
 ```
-asentric/ (or asentric-sdk/)
-├── pkg/
-│   └── asentric/              # PUBLIC SDK API (STABLE)
-│       ├── engine.go          # Detection engine
-│       ├── rule.go            # Rule interface
-│       ├── context.go         # Execution context
-│       ├── alert.go           # Alert model
-│       └── ...
+asentric/
+├── pkg/asentric/              # PUBLIC SDK (Stable API)
+│   ├── engine.go              # Engine interface & implementation
+│   ├── rule.go                # Rule interface
+│   ├── context.go             # Context interface & core models
+│   ├── alert.go               # Alert & Severity model
+│   ├── config.go              # Engine-level config (non-infra)
+│   ├── mock_context.go        # Test helpers (pure)
+│   └── version.go
 │
-├── internal/                  # PRIVATE SDK IMPLEMENTATION
-│   ├── runtime/               # Engine runtime loop
-│   ├── rule/                  # Rule registry & executor
-│   ├── chain/                 # Chain data models & helpers
-│   ├── abi/                   # ABI loading & decoding (internal only)
-│   ├── alert/                 # Alert formatting & envelope
-│   └── observability/         # Internal execution metrics & diagnostics
+├── internal/                  # PRIVATE SDK implementation
+│   ├── engine/                # Engine internals
+│   ├── rule/                  # Rule helpers
+│   ├── context/               # Concrete context implementations
+│   ├── chain/                 # Chain data models (EVM, etc)
+│   ├── abi/                   # ABI decoding helpers (INTERNAL)
+│   └── alert/                 # Alert envelope helpers
 │
 ├── cmd/
-│   ├── asentric/              # CLI tools (init, replay, version)
-│   │   ├── init.go
-│   │   ├── replay.go
-│   │   └── version.go
+│   ├── asentric/              # CLI Tools
+│   │   ├── main.go
+│   │   ├── init.go            # asentric init
+│   │   ├── replay.go          # offline deterministic replay
+│   │   ├── version.go
+│   │   └── internal/
+│   │       └── templates.go
 │   │
-│   └── runtime-reference/    # Reference Runtime (Example)
-│       └── main.go            # Example runtime implementation
+│   └── runtime-reference/     # Reference Runtime (Example)
+│       ├── main.go             # Entry point runtime
+│       ├── config/             # Load yaml config
+│       ├── ingest/             # Subscribe logs/blocks
+│       ├── pipeline/           # Dispatcher & workers
+│       ├── state/              # RUNTIME STATE (Redis here)
+│       ├── alert/              # Alert delivery
+│       └── runtime.go          # Glue code
 │
 ├── templates/
-│   └── project/               # Project templates for `asentric init`
+│   └── project/               # Project templates
 │       ├── config/
 │       │   ├── asentric.yaml
 │       │   ├── registry.yaml
 │       │   └── runtime.yaml
 │       ├── rules/
+│       ├── abi/
 │       └── cmd/watcher/
 │
 ├── examples/
@@ -493,11 +501,11 @@ asentric/ (or asentric-sdk/)
 │   └── multi-chain/          # Example multi-chain setup
 │
 ├── docs/
+│   ├── developer-overview.md             # ⭐ Start here - Alur end-to-end developer
 │   ├── architecture.md                    # Architecture deep dive
 │   ├── sdk-api.md                        # Complete API reference
+│   ├── project-structure.md              # Final structure (authoritative)
 │   ├── final-architecture-recommendation.md  # Final architecture decision
-│   ├── developer-experience.md           # Developer experience guide
-│   ├── infrastructure-requirements.md   # Infrastructure setup guide
 │   └── migration-roadmap.md              # Migration strategy
 │
 ├── go.mod
@@ -514,8 +522,6 @@ asentric/ (or asentric-sdk/)
 - **`cmd/runtime-reference/`** — Reference runtime example (not required, just a reference)
 - **`templates/`** — Project templates for quick start
 - **`examples/`** — Working examples demonstrating SDK usage
-
-**Observability Note:** Observability in the SDK is limited to internal execution metrics and diagnostics (e.g., rule execution timing, performance counters). Exporting metrics or logs to external systems (Prometheus, OpenTelemetry, etc.) is the responsibility of the runtime.
 
 ---
 
@@ -606,6 +612,7 @@ See [LICENSE](LICENSE) for full details.
 
 ## Resources
 
+- **🚀 Start Here**: [docs/developer-overview.md](docs/developer-overview.md) - Alur end-to-end developer
 - **Documentation**: [docs/](docs/)
 - **Examples**: [examples/](examples/)
 - **Issue Tracker**: [GitHub Issues](https://github.com/asentric/asentric-sdk/issues)
