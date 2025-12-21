@@ -1,14 +1,11 @@
 package asentric
 
-type EngineConfig struct {
-	Chain  ChainConfig
-	Stream StreamConfig
+type Config struct {
+	FailFast bool
 }
 
-type ChainConfig struct {
-	RPC string
-}
-
-type StreamConfig struct {
-	Driver string // redis, memory
+func DefaultConfig() *Config {
+	return &Config{
+		FailFast: false,
+	}
 }

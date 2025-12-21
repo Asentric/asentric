@@ -1,13 +1,11 @@
 package asentric
 
-import "time"
+type Context struct {
+	Event *Event
 
-type Context interface {
-	Event() Event
+	Network string
+	ChainID int64
+	Block   uint64
 
-	BlockNumber() uint64
-	TxHash() string
-	Timestamp() time.Time
-
-	Tags() map[string]string
+	// future: historical snapshot, cache, dll
 }

@@ -1,13 +1,16 @@
 package asentric
 
+import "time"
+
 type EventType string
 
-const (
-	EventBlock EventType = "block"
-	EventLog   EventType = "log"
-)
+type Event struct {
+	ID        string
+	Type      EventType
+	Timestamp time.Time
 
-type Event interface {
-	Type() EventType
-	Raw() any
+	Actor  string
+	Target string
+
+	Attributes map[string]any
 }

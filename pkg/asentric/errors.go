@@ -3,6 +3,7 @@ package asentric
 import "errors"
 
 var (
-	ErrRuleAlreadyRegistered = errors.New("rule already registered")
-	ErrInvalidRule           = errors.New("invalid rule")
+	ErrInvalidRule   = errors.New("invalid rule")
+	ErrDuplicateRule = errors.New("duplicate rule id")
+	ErrInvalidEvent  = errors.New("invalid event")
 )
