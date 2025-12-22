@@ -1,11 +1,13 @@
 package asentric
 
-type Context struct {
-	Event *Event
+import (
+	"github.com/asentric/asentric/pkg/domain"
+)
 
-	Network string
-	ChainID int64
-	Block   uint64
-
-	// future: historical snapshot, cache, dll
+type Context interface {
+	ChainID() domain.ChainID
+	Tx() domain.Transaction
+	Block() domain.Block
+	Logs() []domain.Log
+	ABI() domain.ABIRegistry
 }

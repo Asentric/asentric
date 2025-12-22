@@ -1,14 +1,9 @@
 package asentric
 
-type Rule struct {
-	ID          string
-	Name        string
-	Description string
-	Severity    Severity
+type Rule interface {
+	// Name returns the unique identifier for this rule
+	Name() string
 
-	// Matcher adalah fungsi pure
-	Match func(ctx *Context) bool
-
-	Tags    []string
-	Version string
+	// Evaluate processes the given context and returns alerts if triggered
+	Evaluate(ctx Context) (*Alert, error)
 }

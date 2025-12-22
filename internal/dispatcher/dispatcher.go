@@ -1,44 +1,21 @@
 package dispatcher
 
 import (
-	"context"
-
 	"github.com/asentric/asentric/pkg/asentric"
+	"github.com/asentric/asentric/pkg/domain"
 )
 
+// ContextBuilder creates Context from Event.
+// This allows customization of how events are converted to contexts.
+type ContextBuilder interface {
+	Build(event asentric.Event) asentric.Context
+}
+
+// EngineDispatcher dispatches events to the engine for rule evaluation.
+// It bridges EventSource and Engine, converting Events to Contexts.
 type EngineDispatcher struct {
-	Engine *asentric.Engine
-	Sink   asentric.AlertSink
-}
-
-func NewEngineDispatcher(
-	engine *asentric.Engine,
-	sink asentric.AlertSink,
-) *EngineDispatcher {
-	return &EngineDispatcher{
-		Engine: engine,
-		Sink:   sink,
-	}
-}
-
-func (d *EngineDispatcher) Dispatch(
-	ctx context.Context,
-	event asentric.Event,
-) error {
-	execCtx := &asentric.Context{
-		Event: &event,
-	}
-
-	alerts, err := d.Engine.Evaluate(execCtx)
-	if err != nil {
-		return err
-	}
-
-	for _, alert := range alerts {
-		if err := d.Sink.Emit(ctx, alert); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	Engine         *asentric.Engine
+	Sink           asentric.AlertSink
+	ContextBuilder ContextBuilder
+	ABIRegistry    domain.ABIRegistry
 }
