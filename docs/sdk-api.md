@@ -1,125 +1,175 @@
-# Asentric SDK – API Reference
+# Asentric SDK – Public API Specification
 
-> **📖 Lihat alur developer:** [developer-overview.md](developer-overview.md) - Alur end-to-end penggunaan Asentric SDK
+> **🔒 Lihat MVP Spec:** [SPEC.md](SPEC.md) - **SINGLE SOURCE OF TRUTH** untuk hackathon  
+> **📖 Lihat alur developer:** [developer-overview.md](developer-overview.md) - Alur end-to-end penggunaan Asentric SDK  
+> **🏗️ Lihat architecture:** [architecture.md](architecture.md) - Core architecture
 
-This document defines the public, stable API contract of the Asentric SDK.
+**Status:** ✅ **AUTHORITATIVE – CONTRACT LOCKED**  
+**Audience:** SDK Users, Rule Authors, Runtime Implementers  
+**Breaking Change Policy:** **FORBIDDEN** after this document
 
-It is intended for:
-
-* SDK users (rule authors)
-* Runtime implementers (developer-built, self-hosted)
-* Backend consumers
-* Future contributors
-
-> **Important:** Anything outside `pkg/asentric` is not part of the public API and may change without notice.
+**Jika terjadi konflik dengan [SPEC.md](SPEC.md), SPEC.md yang benar.**
 
 ---
 
-## API Stability Guarantees
+## Table of Contents
+
+1. [Purpose & Stability Guarantee](#1-purpose--stability-guarantee)
+2. [Package Boundary Rules](#2-package-boundary-rules)
+3. [Core Types Overview](#3-core-types-overview)
+4. [Engine Contract](#4-engine-contract)
+5. [Rule Contract](#5-rule-contract)
+6. [Context Contract](#6-context-contract)
+7. [Event Contract](#7-event-contract)
+8. [Alert Contract](#8-alert-contract)
+9. [EventSource Contract](#9-eventsource-contract)
+10. [AlertSink Contract](#10-alertsink-contract)
+11. [Dispatcher Contract](#11-dispatcher-contract)
+12. [Error Semantics](#12-error-semantics)
+13. [Extension Points](#13-extension-points-allowed)
+14. [Explicit Non-Extension Points](#14-explicit-non-extension-points-forbidden)
+15. [Versioning & Compatibility Rules](#15-versioning--compatibility-rules)
+
+---
+
+## 1. Purpose & Stability Guarantee
+
+Dokumen ini mendefinisikan **SELURUH** kontrak publik Asentric SDK.
+
+Kontrak ini:
+
+* Digunakan oleh **rule authors**
+* Digunakan oleh **runtime implementers**
+* Digunakan oleh **SDK integrators**
+
+### Stability Guarantee
+
+* ✅ Semua API di `pkg/asentric` **STABLE**
+* ✅ Tidak ada breaking change tanpa major version bump
+* ✅ Semua perubahan harus backward-compatible
+
+### Package Stability
 
 | Package | Stability |
 |---------|-----------|
-| `pkg/asentric/*` | STABLE (v1 contract) |
-| `cmd/asentric/*` | Best-effort (DX tooling) |
-| `internal/*` | Private, no guarantees |
-
-This document only covers public API.
+| `pkg/asentric/*` | ✅ **STABLE** (v1 contract) |
+| `cmd/asentric/*` | ⚠️ Best-effort (DX tooling) |
+| `internal/*` | ❌ Private, no guarantees |
 
 ---
 
-## Core Concepts Overview
+## 2. Package Boundary Rules
 
-At a high level, the SDK consists of:
-
-* **Engine** — orchestrates rule execution
-* **Rule** — pure detection logic (Go code, bukan config)
-* **Context** — immutable execution data
-* **Alert** — semantic detection output
-* **Severity** — strict classification enum
-
-The SDK does not handle infrastructure concerns such as RPC, queues, databases, or delivery.
-
-### Developer Flow
-
-1. **Setup Redis** (required - seperti Ponder.sh butuh Postgres)
-2. **Install & init project** (`asentric init`)
-3. **Konfigurasi YAML** (asentric.yaml, registry.yaml, runtime.yaml)
-4. **Tulis custom rules** (Go code)
-5. **Setup runtime** (cmd/watcher/main.go)
-6. **Test & run** (replay offline, kemudian run runtime)
-
-> **📖 Lihat detail:** [developer-overview.md](developer-overview.md)
-
----
-
-## Engine
-
-### Purpose
-
-The Engine is the central coordinator that:
-
-* Holds registered rules (stateful)
-* Executes rules sequentially for a given context
-* Collects alerts produced by rules
-
-The engine is stateful but not concurrency-safe.
-
-### Engine Lifecycle
+### Allowed Imports (USER CODE)
 
 ```go
-engine := asentric.NewEngine()
-
-engine.RegisterRule(ruleA)
-engine.RegisterRule(ruleB)
-
-alerts, err := engine.Process(ctx)
+import "github.com/asentric/asentric/pkg/asentric"
 ```
 
-### Engine API
+**User code HANYA BOLEH mengimpor dari `pkg/asentric`.**
+
+### Forbidden Imports
 
 ```go
-type Engine interface {
-    RegisterRule(rule Rule) error
-    Process(ctx Context) ([]*Alert, error)
+// ❌ DILARANG
+import "github.com/asentric/asentric/internal/..."
+```
+
+### Rule Mutlak
+
+* ❌ **User TIDAK BOLEH mengimpor `internal/*`**
+* ❌ **`pkg/asentric` TIDAK BOLEH mengimpor `internal/*`**
+* ✅ Dependency hanya satu arah: `internal/*` → `pkg/asentric`
+
+---
+
+## 3. Core Types Overview
+
+| Type | Responsibility |
+|------|---------------|
+| **Engine** | Orchestrates rule evaluation |
+| **Rule** | Pure detection logic |
+| **Context** | Immutable snapshot of event |
+| **Event** | Normalized chain event |
+| **Alert** | Rule output |
+| **EventSource** | Event ingestion interface |
+| **AlertSink** | Alert delivery interface |
+| **Dispatcher** | Runtime orchestration |
+
+---
+
+## 4. Engine Contract
+
+### Type Definition
+
+```go
+type Engine struct {
+    // internal state (rule registry, config)
 }
+
+func NewEngine() *Engine
+func (e *Engine) RegisterRule(rule Rule) error
+func (e *Engine) Evaluate(ctx Context) ([]*Alert, error)
 ```
+
+**Important:** Engine is a **CONCRETE TYPE**, not an interface.
+
+### Extension Point Status
+
+**Engine is NOT an extension point.**
+
+* ❌ Engine tidak boleh di-extend atau di-subclass
+* ❌ Engine tidak boleh di-replace dengan custom implementation
+* ✅ Engine adalah concrete type dengan invariant yang kuat
+
+**Reasoning:**
+
+* Engine punya invariant kuat (determinism, ordering, error semantics)
+* Engine bukan extension point
+* Interface hanya akan membuka peluang "fake engine" yang melanggar kontrak
+
+### Semantics
+
+* ✅ **No execution state** — Engine only maintains configuration state (rules, ordering), not runtime mutable state
+* ✅ **Deterministic** — Same input → same output
+* ✅ **Single-threaded** — Engine tidak concurrency-safe
+* ✅ **No side effects** — Engine tidak melakukan I/O
+
+**Note:** Engine maintains internal state (rule registry, config), but does not maintain per-event or cross-event execution state. Each `Evaluate()` call is independent.
+
+### Rules
+
+* ✅ `ctx` **MUST NOT** be nil
+* ✅ `ctx.Event` **MUST NOT** be nil (jika Context memiliki Event)
+* ✅ Engine **MUST NOT** mutate Context
+* ✅ Engine **MUST NOT** perform I/O
+* ✅ Engine **MUST NOT** manage concurrency
+* ✅ Rules dieksekusi secara **sequential**
+* ✅ Rule execution order adalah **deterministic** (registration order)
+
+### Error Behavior
+
+| Condition | Error |
+|-----------|-------|
+| `ctx == nil` | `ErrInvalidContext` |
+| `ctx.Event == nil` | `ErrInvalidEvent` |
+| Rule execution failure | Propagated error |
+| Rule panic | Engine MUST recover and return `ErrRulePanic` |
 
 ### Behavioral Guarantees
 
 * Rules are executed sequentially
-* Each rule is executed at most once per `Process` call
+* Each rule is executed at most once per `Evaluate` call
 * Rules cannot affect each other's execution
 * Rule execution order is deterministic (registration order)
 * Engine maintains internal state (rule registry, config)
 * Engine is **NOT** safe for concurrent use
 
-### Error Semantics
-
-| Situation | Behavior |
-|-----------|----------|
-| Rule returns `(nil, nil)` | No alert |
-| Rule returns `(alert, nil)` | Alert collected |
-| Rule returns `(nil, error)` | Engine returns error |
-| Rule panics | Panic propagates |
-
-Infrastructure layers decide retry / recovery strategies.
-
 ---
 
-## Rule
+## 5. Rule Contract
 
-### Purpose
-
-A Rule represents a single unit of detection logic.
-
-Rules are:
-
-* Pure
-* Deterministic
-* Side-effect free
-* Stateless
-
-### Rule Interface
+### Interface
 
 ```go
 type Rule interface {
@@ -128,21 +178,28 @@ type Rule interface {
 }
 ```
 
-### Rule Contract
+### Semantics
 
-Rules **MUST**:
+* ✅ **Rule adalah pure function**
+* ✅ **Deterministic** — Same Context → same output
+* ✅ **Side-effect free** — Tidak ada I/O atau mutasi
+* ✅ **No state** — Rule tidak menyimpan state (tidak ada per-event atau cross-event state)
 
-* Not perform I/O
-* Not mutate context
-* Not depend on global state
-* Return at most one alert
-* Return `nil, nil` if no detection
+### Rules
 
-Rules **MAY**:
+**Rule **MUST**:**
 
-* Perform computation
-* Decode ABI data via context
-* Return execution errors
+* ✅ Not perform I/O (network, file, database)
+* ✅ Not mutate Context
+* ✅ Not depend on global state
+* ✅ Return at most one alert per evaluation
+* ✅ Return `nil, nil` if no detection
+
+**Rule **MAY**:**
+
+* ✅ Perform computation
+* ✅ Decode ABI data via context
+* ✅ Return execution errors
 
 ### Error Handling Rules
 
@@ -152,38 +209,44 @@ Rules **MAY**:
 | Detection matched | `alert, nil` |
 | Invalid input / decode failure | `nil, error` |
 
-Errors represent execution failure, not detection outcome.
+**Errors represent execution failure, not detection outcome.**
+
+### Output Rules
+
+* ✅ **1 Rule → maksimal 1 Alert** per evaluasi
+* ✅ **Rule TIDAK BOLEH emit alert langsung** — Alert hanya dikembalikan dari `Evaluate()`
+* ✅ **Rule hanya mengembalikan Alert atau error** — Tidak ada side channel
 
 ---
 
-## Context
+## 6. Context Contract
 
-### Purpose
-
-Context provides all execution data required by rules.
-
-It is:
-
-* Immutable
-* Snapshot-based
-* Explicit
-* Deterministic
-
-Rules cannot mutate context.
-
-### Context Interface (Conceptual)
+### Type Definition
 
 ```go
 type Context interface {
-    ChainID() uint64
-    Tx() Transaction
-    Block() Block
-    Logs() []Log
-    ABI() ABIRegistry
+    ChainID() domain.ChainID  // Returns chain ID (uint64 alias)
+    Tx() domain.Transaction   // Transaction data with Value() *big.Int
+    Block() domain.Block      // Block metadata
+    Logs() []domain.Log       // Decoded logs
+    ABI() domain.ABIRegistry  // ABI access for decoding
 }
 ```
 
-> **Note:** Exact sub-interfaces (`Transaction`, `Block`, `Log`) are defined in SDK types.
+> **Note:** Domain types are defined in `pkg/domain/`. See [SPEC.md](SPEC.md) for complete type definitions.
+
+### Semantics
+
+* ✅ **Immutable** — Context tidak boleh dimutasi
+* ✅ **Snapshot** — Context adalah snapshot dari event
+* ✅ **Single source of truth** — Semua data execution ada di Context
+* ✅ **Deterministic** — Same event → same Context
+
+### Rules
+
+* ✅ **Context HANYA dibuat dari Event** — Context tidak boleh dibuat dari sumber lain
+* ✅ **Context TIDAK BOLEH dimutasi** — Context adalah read-only selama evaluasi
+* ✅ **Context TIDAK BOLEH menyimpan state lain** — Context hanya berisi data dari event
 
 ### Context Guarantees
 
@@ -192,30 +255,67 @@ type Context interface {
 * Same input → same output
 * Safe for replay and testing
 
+### Context Immutability Enforcement
+
+**Context implementers MUST guarantee deep immutability, not only interface-level immutability.**
+
+**Rules:**
+
+* ✅ **Returned objects (Transaction, Block, Log) MUST be immutable** — Objects yang dikembalikan dari Context tidak boleh dimutasi
+* ✅ **SDK MAY wrap underlying data in read-only views** — SDK boleh wrap data dengan read-only views untuk enforce immutability
+* ✅ **Mutation attempts result in undefined behavior** — Attempts untuk memutasi Context atau objects yang dikembalikan akan menghasilkan undefined behavior. Undefined behavior may include incorrect detections, inconsistent results, or engine errors.
+
+**Implementation Requirements:**
+
+* Context implementers harus memastikan bahwa semua data yang dikembalikan adalah immutable
+* Deep immutability berarti tidak hanya interface-level, tapi juga semua nested objects
+* Runtime implementers harus memastikan bahwa data yang diberikan ke Context sudah immutable
+
 > **Note:** The SDK assumes Context is valid and complete. Context validation and enrichment (e.g., fetching missing data, decoding events) is the runtime's responsibility. The SDK does not validate or enrich Context.
 
 ---
 
-## Alert
+## 7. Event Contract
 
-### Purpose
-
-An Alert represents a semantic security signal, not a delivery envelope.
-
-### Execution Reference
-
-Alerts may include an optional execution reference for debugging and traceability:
+### Type Definition
 
 ```go
-type ExecutionRef struct {
-    TxHash      string
+type Event struct {
+    ChainID     uint64
     BlockNumber uint64
+    TxHash      string
+    Payload     any
 }
 ```
 
-**Important:** The `ExecutionRef` is populated by the engine, not by rules. Rules cannot access or modify it.
+**Important:** `ChainID` is `uint64`, not `string`.
 
-### Alert Type
+**Reasoning:**
+
+* ChainID adalah numeric EVM canonical
+* String membuka ambiguity ("1", "01", "eth-mainnet")
+* `uint64` memastikan type safety dan consistency
+
+> **Note:** Exact structure may vary. This is a conceptual representation. The key is that Event is a normalized representation of chain data.
+
+### Semantics
+
+* ✅ **Normalized representation** — Event adalah format yang sudah di-normalize
+* ✅ **Infrastructure-agnostic** — Event tidak mengandung metadata infrastructure
+* ✅ **Immutable** — Event tidak boleh dimutasi
+
+### Rules
+
+* ✅ **Payload READ-ONLY** — Payload tidak boleh dimutasi
+* ✅ **Payload MUST be safe for concurrent read access** — Payload harus aman untuk concurrent read access (runtime boleh parallelize di Dispatcher)
+* ✅ **Event TIDAK BOLEH contain infra metadata** — Event tidak mengandung Redis, RPC, atau metadata infrastructure lainnya
+* ✅ **Event TIDAK BOLEH lazy-load data** — Event harus complete saat dibuat
+
+---
+
+## 8. Alert Contract
+
+### Type Definition
 
 ```go
 type Alert struct {
@@ -226,7 +326,26 @@ type Alert struct {
     Ref         *ExecutionRef  // optional, populated by engine
     Metadata    map[string]any
 }
+
+type ExecutionRef struct {
+    TxHash      string
+    BlockNumber uint64
+}
 ```
+
+### Semantics
+
+* ✅ **Serializable** — Alert dapat di-serialize ke JSON
+* ✅ **Immutable** — Alert tidak boleh dimutasi setelah dibuat
+* ✅ **Output-only** — Alert adalah output dari rule, bukan input
+
+### Rules
+
+* ✅ **Alert TIDAK BOLEH contain delivery logic** — Alert tidak tahu bagaimana akan dikirim
+* ✅ **Alert TIDAK BOLEH mutate Event** — Alert tidak memutasi Event yang menjadi sumbernya
+* ✅ **Alert TIDAK BOLEH trigger side effects** — Alert adalah pure data structure
+* ✅ **`ExecutionRef` is informational only** — Tidak termasuk chain identity, network, atau RPC endpoints
+* ✅ **Metadata MUST NOT be mutated after Alert creation** — Metadata map tidak boleh dimutasi setelah Alert dibuat. Runtime and sinks MUST treat Metadata as read-only. SDK MAY defensively copy Metadata when necessary.
 
 ### Alert Design Rules
 
@@ -234,197 +353,301 @@ type Alert struct {
 * Metadata must be JSON-serializable
 * Alerts do not imply delivery
 * Alerts do not imply persistence
-* `ExecutionRef` is informational only — does not include chain identity, network, or RPC endpoints
+* `ExecutionRef` is populated by the engine, not by rules
 
 ### What Alerts Do Not Include
 
 Alerts do not include:
 
-* Chain IDs
+* Chain IDs (chain context is runtime responsibility)
 * Network information
 * RPC endpoints
 * Delivery metadata
 
-> **Note:** Including `tx_hash` and `block_number` in `ExecutionRef` does not imply the SDK understands chain identity. Chain context remains the responsibility of runtime systems.
+---
+
+## 9. EventSource Contract
+
+### Interface
+
+```go
+type EventSource interface {
+    Start(ctx context.Context) (<-chan Event, error)
+}
+```
+
+### Semantics
+
+* ✅ **Owned by runtime** — EventSource adalah runtime responsibility
+* ✅ **Produces normalized Events** — EventSource menghasilkan Event yang sudah di-normalize
+* ✅ **Manages its own goroutines** — EventSource mengelola concurrency sendiri
+
+### Rules
+
+* ✅ **Start MUST be idempotent** — Memanggil Start beberapa kali tidak menyebabkan error
+* ✅ **Channel close signals completion** — Close channel menandakan EventSource selesai
+* ✅ **EventSource TIDAK BOLEH panic** — Error harus dikembalikan, bukan panic
+
+### Responsibilities
+
+* Fetch chain data (RPC, websocket, etc.)
+* Normalize chain data menjadi Event
+* Manage subscription lifecycle
+* Handle reconnection and retry (internal)
 
 ---
 
-## Severity
+## 10. AlertSink Contract
 
-### Purpose
-
-Severity provides strict, normalized classification for alerts.
-
-### Severity Enum
+### Interface
 
 ```go
-type Severity int
+type AlertSink interface {
+    Emit(ctx context.Context, alert *Alert) error
+}
+```
 
-const (
-    Info Severity = iota
-    Low
-    Medium
-    High
-    Critical
+### Semantics
+
+* ✅ **External delivery mechanism** — AlertSink adalah interface untuk delivery
+* ✅ **Infrastructure-owned** — Implementasi AlertSink adalah runtime responsibility
+
+### Rules
+
+* ✅ **Sink MAY perform I/O** — AlertSink boleh melakukan network calls, database writes, dll
+* ✅ **Sink MUST NOT mutate Alert** — AlertSink tidak boleh memutasi Alert
+* ✅ **Sink MUST handle retries externally** — Retry logic adalah AlertSink responsibility
+
+### Responsibilities
+
+* Deliver alerts ke external systems (webhook, database, message queue, etc.)
+* Handle delivery failures dan retries
+* Manage delivery state (jika diperlukan)
+
+---
+
+## 11. Dispatcher Contract
+
+### Status: Internal Component (NOT Public Extension Point)
+
+**Dispatcher is NOT part of the stable SDK surface.**
+
+**Hard Rule:**
+
+* ❌ **Dispatcher interface MAY exist in `pkg/asentric` for documentation only**, but is **NOT a supported public extension point**
+* ❌ **Dispatcher MAY change without notice** — Tidak ada stability guarantee
+* ❌ **User code MUST NOT depend on Dispatcher interface** — Dispatcher adalah internal implementation detail
+
+### Interface (Documentation Only)
+
+```go
+type Dispatcher interface {
+    Dispatch(ctx context.Context, event Event) error
+}
+```
+
+> **Warning:** This interface is shown for documentation purposes only. It is NOT a stable public API and MUST NOT be used by user code.
+
+### Semantics
+
+* ✅ **Runtime orchestration layer** — Dispatcher adalah adapter antara EventSource dan Engine
+* ✅ **Bridges Event → Context → Engine → AlertSink** — Dispatcher mengorkestrasi alur data
+* ✅ **May handle parallelism** — Dispatcher boleh mengelola concurrency
+
+### Rules
+
+* ✅ **Dispatcher MAY handle parallelism** — Dispatcher boleh menggunakan worker pools, goroutines, dll
+* ✅ **Dispatcher MUST NOT mutate Event** — Dispatcher tidak boleh memutasi Event
+* ✅ **Dispatcher MUST respect Engine determinism** — Dispatcher harus memastikan Engine tetap deterministic
+
+### Responsibilities
+
+* Receive events dari EventSource
+* Convert Event menjadi Context
+* Invoke Engine.Evaluate() dengan Context
+* Collect alerts dari Engine
+* Send alerts ke AlertSink
+
+**Catatan:** Dispatcher adalah komponen internal (bukan public API) dan dapat berubah bebas tanpa breaking change. User code tidak boleh mengimplementasikan atau menggunakan Dispatcher interface.
+
+---
+
+## 12. Error Semantics
+
+### Defined Errors
+
+```go
+var (
+    ErrInvalidContext  = errors.New("invalid context")
+    ErrInvalidEvent     = errors.New("invalid event")
+    ErrNoDispatcher     = errors.New("no dispatcher configured")
+    ErrAlreadyRunning   = errors.New("runtime already running")
+    ErrRulePanic        = errors.New("rule panic")
 )
 ```
 
-### Severity Rules
+**Note:** `ErrRuleNotFound` is reserved for future SDK APIs and may not be returned in v1 execution flow. It is not part of the current public error contract.
 
-* Enum is closed (no custom values)
-* Ordering is meaningful
-* Mapping to strings is responsibility of runtime / backend
+### Error Rules
 
----
+* ✅ **Errors are typed & stable** — Error types tidak berubah tanpa major version bump
+* ✅ **No panic in public API** — Public API tidak boleh panic, harus return error
+* ✅ **Errors are propagated upward** — Error dari rule di-propagate ke caller
+* ✅ **Panic recovery is Engine responsibility** — Engine MUST recover dari rule panic dan return error
 
-## Configuration
+### Error Handling by Component
 
-### Purpose
+| Component | Error Behavior |
+|-----------|----------------|
+| **Engine** | Returns error, stops processing current Context. **MUST recover from rule panic and return `ErrRulePanic`** |
+| **Rule** | Returns `(nil, error)` for execution failure. **MUST NOT panic** (but if it does, Engine will recover) |
+| **EventSource** | Returns error from `Start()`, closes channel on fatal error |
+| **AlertSink** | Returns error, caller decides retry strategy |
+| **Dispatcher** | Returns error, runtime decides recovery strategy |
 
-SDK configuration controls engine behavior, not infrastructure.
+### Panic Handling
 
-Examples:
+**Rule panic behavior:**
 
-* Enabled rules
-* Rule options
-* Execution limits
+* ✅ **Engine MUST recover from rule panic** — Engine tidak boleh crash karena rule panic
+* ✅ **Engine MUST return `ErrRulePanic`** — Panic di-recover dan dikonversi menjadi error
+* ✅ **SDK public API tidak boleh crash runtime** — Panic recovery adalah Engine responsibility, bukan runtime
 
-### Config Principles
+**Reasoning:**
 
-* Parsed outside rules
-* Injected into engine
-* Immutable during execution
-
-> **Note:** Exact schema is documented in [architecture.md](architecture.md).
-
----
-
-## CLI API (`cmd/asentric`)
-
-### Scope
-
-The CLI exists only for developer tooling.
-
-It does not:
-
-* Run watchers
-* Connect to RPC nodes
-* Deliver alerts
-* Manage infrastructure
-
-> **Important:** The CLI does not run production watchers or connect to blockchains. It is strictly a developer tool for scaffolding, replay, and rule validation.
-
-### Supported Commands (v1)
-
-```bash
-asentric init <project>        # Generate project template
-asentric replay --fixture <file>  # Test offline
-asentric version                # Show version
-```
-
-### CLI Responsibilities
-
-* Project scaffolding
-* Replay testing
-* Local development workflows
-
-### Generated Project Structure
-
-When you run `asentric init <project>`, it generates:
-
-```
-my-protocol-monitor/
-├── config/
-│   ├── asentric.yaml      # Engine configuration
-│   ├── registry.yaml      # Target monitoring list (1 chain per project)
-│   └── runtime.yaml        # Runtime configuration (Redis, RPC, database)
-├── rules/                   # Your security rules
-├── abi/                     # Smart contract ABIs
-└── cmd/
-    └── watcher/
-        └── main.go          # Runtime entry point (you build this)
-```
-
-**Note:** Redis is required for runtime setup (like Ponder.sh requires Postgres). See [developer-overview.md](developer-overview.md#1-setup-infrastructure--instalasi) for details.
+* SDK public API tidak boleh crash runtime
+* Panic recovery adalah Engine responsibility, bukan runtime
+* Rule panic harus di-handle gracefully dengan error, bukan propagate
 
 ---
 
-## Concurrency Model
+## 13. Extension Points (ALLOWED)
 
-* Engine instances are single-threaded
-* Engine is not concurrency-safe
-* Parallelism must be handled by runtime systems
-* **Recommended:** one engine instance per worker
+| Extension | How |
+|-----------|-----|
+| **Custom rules** | Implement `Rule` interface |
+| **Custom chain source** | Implement `EventSource` interface |
+| **Custom alert delivery** | Implement `AlertSink` interface |
+| **Runtime orchestration** | Runtime responsibility (Dispatcher is NOT an extension point) |
+| **Parallelism** | Runtime layer only (via runtime orchestration) |
 
----
-
-## Testing Guidelines
-
-Rules are easy to test:
+### Example: Custom Rule
 
 ```go
-ctx := asentric.NewMockContext(...)
-rule := &MyRule{}
+type MyRule struct{}
 
-alert, err := rule.Evaluate(ctx)
+func (r *MyRule) Name() string {
+    return "my_custom_rule"
+}
+
+func (r *MyRule) Evaluate(ctx Context) (*Alert, error) {
+    // Pure detection logic
+    if condition {
+        return &Alert{
+            Rule:        r.Name(),
+            Severity:    High,
+            Title:       "Detection Title",
+            Description: "Detection Description",
+            Metadata:    map[string]any{},
+        }, nil
+    }
+    return nil, nil
+}
 ```
-
-No infrastructure mocks required.
 
 ---
 
-## Non-Goals (Explicit)
+## 14. Explicit Non-Extension Points (FORBIDDEN)
 
-Asentric SDK does **NOT**:
+Anti-pattern berikut **DILARANG**:
 
-* Manage RPC connections
-* Fetch blockchain data
-* Store alerts
-* Deliver notifications
-* Provide APIs
-* Handle deployment
-* Understand chain identity (chain ID, network name)
-* Manage network or RPC endpoint information
+* ❌ **Modify Engine behavior** — Engine interface tidak boleh di-extend atau di-modify
+* ❌ **Mutate Context** — Context adalah immutable, tidak boleh dimutasi
+* ❌ **Inject infra into public API** — Public API tidak boleh mengandung Redis, RPC, atau infrastructure lainnya
+* ❌ **Emit alert outside rule** — Alert hanya boleh dihasilkan oleh Rule.Evaluate()
+* ❌ **Stateful rule execution** — Rule tidak boleh menyimpan state antar evaluasi
+* ❌ **Rule-to-rule communication** — Rules tidak boleh berkomunikasi satu sama lain
 
-> **Important:** Including `tx_hash` and `block_number` in `ExecutionRef` does not imply the SDK understands chain identity. The SDK remains chain-agnostic. All chain context (chain ID, network, RPC endpoints) is the responsibility of runtime systems.
+### Examples of Forbidden Patterns
 
-Those are handled by other repositories.
+```go
+// ❌ DILARANG: Mutate Context
+func (r *MyRule) Evaluate(ctx Context) (*Alert, error) {
+    ctx.SetData(newData)  // DILARANG
+}
+
+// ❌ DILARANG: Network call in Rule
+func (r *MyRule) Evaluate(ctx Context) (*Alert, error) {
+    resp, err := http.Get("https://api.example.com")  // DILARANG
+}
+
+// ❌ DILARANG: Stateful Rule
+var globalState = make(map[string]bool)  // DILARANG
+func (r *MyRule) Evaluate(ctx Context) (*Alert, error) {
+    globalState["key"] = true  // DILARANG
+}
+```
 
 ---
 
-## Repository Structure
+## 15. Versioning & Compatibility Rules
 
-The Asentric SDK follows a monorepo structure:
+### Semantic Versioning
 
-```
-asentric/ (or asentric-sdk/)
-├── pkg/asentric/          # Public API (STABLE)
-├── cmd/asentric/          # CLI tools
-├── cmd/runtime-reference/ # Reference runtime (example)
-├── examples/              # Examples
-├── templates/             # Project templates
-└── docs/                  # Documentation
-```
+* ✅ **`pkg/asentric` follows semantic versioning** — Major.Minor.Patch
+* ✅ **Breaking change → major bump** — Breaking changes memerlukan major version bump
+* ✅ **Internal packages → no stability guarantee** — `internal/*` dapat berubah tanpa notice
 
-**Key Points:**
-- ✅ **1 Repository (Monorepo)** - Framework + CLI + Examples + Reference Runtime
-- ✅ **Reference Runtime** - Example implementation (not required)
-- ✅ **Examples** - Real-world examples (simple-watcher, custom-rules, ml-integration)
-- ✅ **Self-hosted** - Developer builds runtime
+### Compatibility Guarantees
+
+* ✅ **Backward compatibility** — Minor dan patch versions tidak breaking
+* ✅ **Deprecation policy** — Deprecated APIs akan di-mark dan dihapus di major version berikutnya
+* ✅ **Documentation is authoritative** — Dokumentasi ini adalah source of truth
+
+### Version History
+
+| Version | Status | Notes |
+|---------|--------|-------|
+| v1.0.0 | ✅ **LOCKED** | Initial stable contract |
+
+---
+
+## FINAL LOCK STATEMENT
+
+**`sdk-api.md` is now LOCKED.**
+
+From this point forward:
+
+* ✅ **Any breaking change requires Architecture RFC** — Breaking changes harus melalui Architecture Review
+* ✅ **`pkg/asentric` is considered frozen** — Public API tidak boleh berubah tanpa major version bump
+* ✅ **Internal implementation must conform to this contract** — Implementasi internal harus mengikuti kontrak ini
+
+---
+
+## Related Documentation
+
+* **[SPEC.md](SPEC.md)** - MVP specification (authoritative)
+* **[architecture.md](architecture.md)** - Core architecture (authoritative)
+* **[project-structure.md](project-structure.md)** - Final project structure
+* **[developer-overview.md](developer-overview.md)** - Developer end-to-end guide
 
 ---
 
 ## Summary
 
-Asentric SDK is:
+Asentric SDK Public API adalah:
 
-* A pure security detection engine
-* A stable contract for rule authors
-* A shared brain across runtimes
-* A strict boundary between logic and infrastructure
-* **1 Repository (Monorepo)** - Framework + CLI + Examples + Reference Runtime
-* **Self-hosted** - Developer builds runtime
-* **Redis required** - For setup (like Ponder.sh needs Postgres)
-* **Database optional** - For saving events/logs
+* ✅ **Stable contract** — Kontrak yang stabil dan terkunci
+* ✅ **Pure execution engine** — Engine yang pure dan deterministic
+* ✅ **Infrastructure-agnostic** — Tidak tergantung pada infrastructure
+* ✅ **Extensible** — Dapat di-extend melalui interfaces
+* ✅ **Well-defined boundaries** — Batasan yang jelas antara public dan internal
 
-This API contract is the foundation for the entire Asentric ecosystem.
+**Dokumen ini bersifat authoritative.**
+
+Jika terjadi konflik antara implementasi dan dokumen ini, maka implementasi dianggap salah.
+
+---
+
+**Last Updated:** 2024  
+**Version:** 1.0 (FINAL – LOCKED)
