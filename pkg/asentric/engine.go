@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+// Engine mengevaluasi Context terhadap RuleRegistry.
+// Engine bersifat stateless dan single-call safe.
 type Engine struct {
 	registry *RuleRegistry
 	config   *Config
@@ -18,6 +20,10 @@ func NewEngine(registry *RuleRegistry, cfg *Config) *Engine {
 	}
 }
 
+// Evaluate mengeksekusi semua rule terhadap Context.
+// - Tidak memodifikasi Context
+// - Tidak mengelola concurrency
+// - Tidak melakukan side-effect selain menghasilkan Alert
 func (e *Engine) Evaluate(ctx *Context) ([]*Alert, error) {
 	if ctx == nil || ctx.Event == nil {
 		return nil, ErrInvalidEvent
