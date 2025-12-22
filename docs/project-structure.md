@@ -1,7 +1,11 @@
 # Asentric – Final Project Structure (v1)
 
+> **🔒 Lihat MVP Spec:** [SPEC.md](SPEC.md) - **SINGLE SOURCE OF TRUTH** untuk hackathon
+
 Dokumen ini mendefinisikan **struktur folder & file final** untuk seluruh ekosistem Asentric.
 Struktur ini adalah **versi jadi (authoritative)** dan menjadi acuan implementasi untuk seluruh tim.
+
+**Jika terjadi konflik dengan [SPEC.md](SPEC.md), SPEC.md yang benar.**
 
 Tujuan utama struktur ini:
 
@@ -33,20 +37,43 @@ asentric/
 
 ---
 
-## 2. Public SDK – `pkg/asentric/`
+## 2. Public SDK – `pkg/`
 
 **Ini adalah kontrak resmi SDK.**
 Semua developer eksternal **hanya boleh** bergantung ke folder ini.
 
+### 2.1 Core SDK (`pkg/asentric/`)
+
 ```
 pkg/asentric/
-├── engine.go        # Engine interface & implementation
+├── engine.go        # Engine struct & implementation
 ├── rule.go          # Rule interface
-├── context.go       # Context interface & core models
+├── context.go       # Context interface
 ├── alert.go         # Alert & Severity model
+├── event.go         # Event model
 ├── config.go        # Engine-level config (non-infra)
-├── mock_context.go  # Test helpers (pure)
-└── version.go
+├── errors.go        # Error types
+├── event_source.go  # EventSource interface
+├── alert_sink.go    # AlertSink interface
+└── dispatcher.go    # Dispatcher interface
+```
+
+### 2.2 Domain Types (`pkg/domain/`)
+
+Lightweight, infrastructure-agnostic types untuk public API.
+
+```
+pkg/domain/
+├── address.go       # Address (string-based)
+├── hash.go          # Hash (string-based)
+├── chain.go         # ChainID, Chain
+├── transaction.go   # Transaction struct
+├── block.go         # Block struct
+├── log.go           # Log struct
+├── event.go         # Event (decoded)
+├── value.go         # NativeValue, TokenAmount
+├── token.go         # Token metadata
+└── abi.go           # ABIRegistry interface
 ```
 
 **Prinsip penting:**
@@ -55,43 +82,50 @@ pkg/asentric/
 * ❌ Tidak ada RPC
 * ❌ Tidak ada goroutine
 * ❌ Tidak ada IO
+* ❌ Tidak ada geth imports
 * ✅ Pure execution only
+* ✅ String-based types untuk ergonomics
 
 ---
 
 ## 3. Internal SDK – `internal/`
 
 Semua di sini **private**, boleh berubah tanpa breaking change.
+**geth types BOLEH digunakan di sini.**
 
 ```
 internal/
-├── engine/                 # Engine internals
-│   ├── executor.go         # Rule execution loop
-│   └── registry.go         # Rule registry
+├── chain/                  # Raw chain types (geth-compatible)
+│   ├── types.go            # RawAddress, RawHash, RawTransaction, etc.
+│   └── client.go           # Chain client interface
 │
-├── rule/                   # Rule helpers
-│   └── metadata.go
+├── adapter/                # Conversion layer
+│   ├── converter.go        # chain types → domain types
+│   └── geth.go             # geth types → chain types
+│
+├── runtime/                # Runtime lifecycle
+│   ├── runtime.go          # Runtime struct & event loop
+│   └── shutdown.go         # Graceful shutdown
+│
+├── dispatcher/             # Event dispatching
+│   └── dispatcher.go       # Dispatcher implementation
 │
 ├── context/                # Concrete context implementations
-│   └── evm_context.go
+│   └── evm_context.go      # EVM-specific context
 │
-├── chain/                  # Chain data models (EVM, etc)
-│   ├── transaction.go
-│   ├── block.go
-│   └── log.go
+├── abi/                    # ABI decoding helpers
+│   ├── loader.go           # ABI file loading
+│   └── decoder.go          # Event/method decoding
 │
-├── abi/                    # ABI decoding helpers (INTERNAL)
-│   ├── loader.go
-│   └── decoder.go
-│
-└── alert/                  # Alert envelope helpers
-    └── formatter.go
+└── alert/                  # Alert helpers
+    └── formatter.go        # Alert formatting
 ```
 
-**Catatan:**
+**Hybrid Architecture:**
 
-* ABI helpers **tidak diexpose** ke rule author
-* Semua internal helpers tidak accessible dari luar
+* ✅ **geth types ALLOWED** di `internal/chain/` dan `internal/adapter/`
+* ✅ Conversion layer maintains boundary
+* ❌ geth types TIDAK BOLEH di `pkg/`
 
 ---
 
@@ -157,19 +191,21 @@ Digunakan oleh `asentric init`.
 ```
 templates/project/
 ├── config/
-│   ├── asentric.yaml      # Engine & runtime config
-│   ├── registry.yaml      # What to monitor
-│   └── runtime.yaml       # Runtime config (Redis, RPC, database)
+│   ├── asentric.yaml      # Runtime & engine config
+│   └── registry.yaml      # What to monitor
 │
 ├── rules/
 │   └── example_rule.go
 │
 ├── abi/
-│   └── example.json
+│   └── .gitkeep
 │
-└── cmd/
-    └── watcher/
-        └── main.go
+├── cmd/
+│   └── watcher/
+│       └── main.go
+│
+├── go.mod.tmpl
+└── README.md.tmpl
 ```
 
 ---
@@ -192,12 +228,11 @@ Digunakan sebagai referensi, **bukan production**.
 
 ```
 docs/
-├── developer-overview.md    # ⭐ Start here - Alur end-to-end developer
+├── SPEC.md                  # ⭐ MVP Specification (SINGLE SOURCE OF TRUTH)
+├── developer-overview.md    # Alur end-to-end developer
 ├── architecture.md          # Core philosophy & boundaries
-├── sdk-api.md              # Public API reference
-├── project-structure.md     # This file - Final structure
-├── final-architecture-recommendation.md  # Final architecture decision
-└── migration-roadmap.md    # Migration strategy
+├── sdk-api.md               # Public API reference
+└── project-structure.md     # This file - Final structure
 ```
 
 ---
@@ -257,8 +292,8 @@ Struktur ini:
 
 ## Related Documentation
 
+* **[SPEC.md](SPEC.md)** - MVP specification (authoritative)
 * **[developer-overview.md](developer-overview.md)** - Alur end-to-end developer
 * **[architecture.md](architecture.md)** - Core philosophy & boundaries
 * **[sdk-api.md](sdk-api.md)** - Public API reference
-* **[final-architecture-recommendation.md](final-architecture-recommendation.md)** - Final architecture decision
 

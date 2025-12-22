@@ -1,8 +1,12 @@
 # Asentric SDK – Developer Overview
 
+> **🔒 Lihat MVP Spec:** [SPEC.md](SPEC.md) - **SINGLE SOURCE OF TRUTH** untuk hackathon
+
 Dokumen ini menjelaskan **alur end-to-end penggunaan Asentric SDK** dari sudut pandang developer. Tujuannya adalah memberikan gambaran besar (big picture) tentang bagaimana Asentric digunakan, tanpa masuk ke detail teknis implementasi.
 
 Asentric dirancang dengan filosofi **developer experience seperti Ponder.sh**: sederhana untuk memulai, fleksibel untuk use case kompleks, dan bersih secara arsitektur.
+
+**Jika terjadi konflik dengan [SPEC.md](SPEC.md), SPEC.md yang benar.**
 
 ---
 
@@ -77,19 +81,17 @@ Struktur project hasil inisialisasi:
 ```
 my-protocol-monitor/
 ├── config/
-│   ├── asentric.yaml      # Engine configuration
-│   ├── registry.yaml      # Target monitoring list (1 chain per project)
-│   └── runtime.yaml        # Runtime configuration (Redis, RPC, database)
+│   ├── asentric.yaml      # Runtime & engine configuration
+│   └── registry.yaml      # Target monitoring list (1 chain per project)
 ├── rules/
-│   ├── large_swap.go      # Custom rule
-│   └── upgrade.go         # Custom rule
+│   └── example_rule.go    # Custom rules
 ├── abi/
-│   └── contracts.json     # Contract ABIs
+│   └── .gitkeep           # Contract ABIs go here
 ├── cmd/
 │   └── watcher/
-│       └── main.go        # Runtime entry point (you build this)
-└── fixtures/
-    └── example_tx.json     # Example fixture for replay
+│       └── main.go        # Runtime entry point
+├── go.mod
+└── README.md
 ```
 
 Struktur ini mencerminkan pemisahan concern yang jelas:
@@ -102,76 +104,59 @@ Struktur ini mencerminkan pemisahan concern yang jelas:
 
 ## 3. Konfigurasi (YAML)
 
+Asentric menggunakan **2 file konfigurasi**:
+
 ### asentric.yaml
 
-Digunakan untuk mengatur **bagaimana engine berjalan**, seperti:
+Digunakan untuk mengatur **runtime & engine configuration**:
 
-* Rules yang diaktifkan
-* Opsi per rule
-* Batas eksekusi (timeout, max rules)
-
-File ini **tidak mengandung logic deteksi** dan **tidak mengandung RPC endpoints atau chain identity**.
+* Chain RPC endpoint (WebSocket)
+* Redis configuration
+* Webhook URL
+* Engine options
 
 ```yaml
 # config/asentric.yaml
+
+# Chain configuration
+chain:
+  rpc_ws: "wss://rpc.mantle.xyz/ws"
+  name: "Mantle"           # Network name for alerts
+  chain_id: 5000           # Optional, auto-detect if not provided
+
+# Redis configuration (required)
+redis:
+  addr: "localhost:6379"
+
+# Webhook configuration (required)
+webhook:
+  url: "https://your-webhook.com/alerts"
+
+# Engine configuration (optional)
 engine:
-  enabled_rules:
-    - large_swap_detection
-    - suspicious_transfer
-  
-  rule_options:
-    large_swap_detection:
-      threshold: "1000000000000000000"  # 1 ETH in wei
-  
-  execution:
-    max_rules_per_context: 100
-    timeout_ms: 5000
+  fail_fast: false
 ```
 
 ---
 
 ### registry.yaml
 
-Digunakan untuk mendefinisikan **apa yang dimonitor**, seperti:
+Digunakan untuk mendefinisikan **apa yang dimonitor**:
 
 * Smart contract addresses (1 chain per project)
-* EOA addresses
-* Label dan status enable/disable
-
-Registry bersifat **declarative** dan hanya menjadi input bagi runtime untuk menentukan target monitoring.
+* Contract names
+* ABI file paths
 
 ```yaml
 # config/registry.yaml
 targets:
-  contracts:
-    - address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
-      name: "Uniswap V3 Router"
-      abi_path: "abi/uniswap_v3_router.json"
-      enabled: true
-```
-
----
-
-### runtime.yaml
-
-Digunakan untuk mengatur **infrastructure runtime**, seperti:
-
-* Redis configuration (required)
-* RPC endpoint (developer choice)
-* Database configuration (optional - untuk save events/logs)
-
-```yaml
-# config/runtime.yaml
-runtime:
-  redis:
-    addr: "localhost:6379"
-  
-  rpc:
-    endpoint: "https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
-  
-  database:
-    enabled: false  # Optional - untuk save events/logs
-    type: "postgres"
+  - address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+    name: "Uniswap V3 Router"
+    abi_path: "abi/uniswap_v3_router.json"
+    
+  - address: "0x..."
+    name: "My Protocol Vault"
+    abi_path: "abi/vault.json"
 ```
 
 ---
@@ -187,7 +172,7 @@ Semua logic deteksi ditulis sebagai **custom rules dalam Go**:
 ### Contoh Rule
 
 ```go
-// rules/large_swap.go
+// rules/large_transfer.go
 package rules
 
 import (
@@ -195,27 +180,32 @@ import (
     "github.com/asentric/asentric/pkg/asentric"
 )
 
-type LargeSwapRule struct{}
-
-func (r *LargeSwapRule) Name() string {
-    return "large_swap_detection"
+type LargeTransferRule struct {
+    Threshold *big.Int
 }
 
-func (r *LargeSwapRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
+func NewLargeTransferRule(threshold *big.Int) *LargeTransferRule {
+    return &LargeTransferRule{Threshold: threshold}
+}
+
+func (r *LargeTransferRule) Name() string {
+    return "large_transfer_detection"
+}
+
+func (r *LargeTransferRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
     tx := ctx.Tx()
-    threshold := big.NewInt(1000000000000000000) // 1 ETH
     
-    if tx.Value().Cmp(threshold) > 0 {
-        return &asentric.Alert{
-            Severity:    asentric.High,
-            Title:       "Large Swap Detected",
-            Description: "Transaction value exceeds threshold",
-            Metadata: map[string]interface{}{
-                "value":     tx.Value().String(),
-                "threshold": threshold.String(),
-            },
-            // Note: Ref (tx_hash, block_number) is populated by engine
-        }, nil
+    // tx.Value() returns *big.Int for easy comparison
+    if tx.Value().Cmp(r.Threshold) > 0 {
+        return asentric.NewAlert(
+            r.Name(),
+            asentric.SeverityHigh,
+            "Large Transfer Detected",
+            "Transaction value exceeds threshold",
+        ).WithMetadata("value", tx.Value().String()).
+          WithMetadata("threshold", r.Threshold.String()).
+          WithMetadata("from", tx.From.String()).
+          WithMetadata("to", tx.To.String()), nil
     }
     
     return nil, nil
@@ -239,8 +229,8 @@ Rules diregistrasikan ke engine sebelum runtime dijalankan:
 ```go
 // cmd/watcher/main.go
 engine := asentric.NewEngine()
-engine.RegisterRule(&LargeSwapRule{})
-engine.RegisterRule(&UpgradeRule{})
+engine.RegisterRule(rules.NewLargeTransferRule(big.NewInt(1e18)))
+engine.RegisterRule(&rules.UpgradeDetectionRule{})
 ```
 
 Secara konsep:
@@ -249,61 +239,65 @@ Secara konsep:
 
 ---
 
-## 6. Runtime (Watcher)
+## 6. Runtime
 
-Runtime adalah **entry point aplikasi**, biasanya berada di:
+Runtime adalah **entry point aplikasi**, berada di:
 
 ```
 cmd/watcher/main.go
 ```
 
-### Tanggung Jawab Runtime
-
-* Load runtime config (Redis config dari runtime.yaml - framework handle koneksi)
-* Connect ke RPC (developer choice)
-* Setup Database (optional - untuk save events/logs)
-* Parse config & registry
-* Mengambil event / transaksi dari blockchain
-* Mengatur concurrency & lifecycle
-* Menjalankan engine
-* Mengirim alert ke channel yang dikonfigurasi
-
-**Catatan:** Framework yang handle Redis client connection. Developer hanya perlu konfigurasi di `runtime.yaml`.
-
-Engine **tidak tahu** bagaimana data diambil atau alert dikirim.
-
-### Contoh Runtime Implementation
+### Developer Experience Target
 
 ```go
 // cmd/watcher/main.go
 package main
 
 import (
+    "context"
+    "log"
+    "math/big"
+    
     "github.com/asentric/asentric/pkg/asentric"
+    "my-project/rules"
 )
 
 func main() {
-    // 1. Load runtime config (Redis config ada di runtime.yaml)
-    config := loadRuntimeConfig("config/runtime.yaml")
+    // 1. Load configuration (from config/ directory)
+    config, err := asentric.LoadConfig("config/")
+    if err != nil {
+        log.Fatal(err)
+    }
     
-    // 2. Setup engine
+    // 2. Create engine and register rules
     engine := asentric.NewEngine()
-    engine.RegisterRule(&LargeSwapRule{})
+    engine.RegisterRule(rules.NewLargeTransferRule(big.NewInt(1e18)))
+    engine.RegisterRule(&rules.UpgradeDetectionRule{})
     
-    // 3. Setup Database (optional - untuk save events/logs)
-    // var db *gorm.DB
-    // if config.Database.Enabled { ... }
+    // 3. Create runtime and start
+    runtime := asentric.NewRuntime(config, engine)
     
-    // 4. Start monitoring (framework handle Redis client)
-    watcher := asentric.NewWatcher(engine, config)
-    watcher.Start()
+    // 4. Run (blocks until SIGINT/SIGTERM)
+    if err := runtime.Start(context.Background()); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
-**Catatan:** Framework yang handle Redis client. Developer hanya perlu:
-- Setup Redis server (docker)
-- Konfigurasi di `runtime.yaml`
-- Framework otomatis connect ke Redis berdasarkan config
+### Framework Handles
+
+- ✅ WebSocket subscription to chain
+- ✅ Redis queue management
+- ✅ Context building from events
+- ✅ Engine evaluation
+- ✅ Webhook alert delivery
+- ✅ Graceful shutdown (SIGINT/SIGTERM)
+
+### Developer Provides
+
+- ✅ Configuration files
+- ✅ Custom rules
+- ✅ ABI files
 
 ---
 
