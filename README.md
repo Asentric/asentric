@@ -9,18 +9,26 @@ Asentric SDK provides a pure execution engine, rule system, and explicit runtime
 
 ---
 
+## 📚 Documentation
+
+> **🔒 MVP Specification:** [docs/SPEC.md](docs/SPEC.md) - **SINGLE SOURCE OF TRUTH** (locked)  
+> **📚 Memahami Code:** [docs/UNDERSTAND-PKG.md](docs/UNDERSTAND-PKG.md) - Dokumentasi pkg/asentric dan pkg/domain  
+> **🔧 Implementation Guide:** [docs/IMPL-GUIDE.md](docs/IMPL-GUIDE.md) - Step-by-step build guide  
+> **🚀 Quick Start:** [docs/developer-overview.md](docs/developer-overview.md) - Alur end-to-end developer  
+> **🏗️ Architecture:** [docs/architecture.md](docs/architecture.md) - Core architecture
+
+---
+
 ## Overview
 
 Asentric SDK adalah **framework untuk real-time smart contract security monitoring** yang memungkinkan developer:
 
 * Mendefinisikan **apa yang dimonitor** melalui konfigurasi YAML
 * Menulis **logic deteksi sendiri** melalui custom rules (Go)
-* Menjalankan engine secara lokal atau di runtime mana pun
-* Menghasilkan alert yang bersifat semantik dan deterministik
+* Menjalankan **self-hosted runtime**
+* Menerima **alert via webhook** secara real-time
 
 Asentric **bukan SaaS**, dan **bukan rule-engine berbasis YAML**. Asentric adalah **SDK + runtime pattern** dengan developer experience seperti Ponder.sh.
-
-> **🚀 Mulai dari sini:** [docs/developer-overview.md](docs/developer-overview.md) - Alur end-to-end developer
 
 ---
 
@@ -139,12 +147,10 @@ The SDK provides the **core detection logic**, while external systems handle:
 ### Prerequisites
 
 - Go 1.21 or higher
-- Redis 7+ (required for setup - seperti Ponder.sh butuh Postgres)
-- Basic understanding of blockchain transactions and smart contracts
+- Redis 7+ (required)
+- WebSocket RPC endpoint (Alchemy, Infura, etc.)
 
-### 1. Setup Redis (Required)
-
-Seperti Ponder.sh memerlukan Postgres untuk setup awal, Asentric memerlukan Redis untuk message queue dan state management:
+### 1. Setup Redis
 
 ```bash
 docker run -d -p 6379:6379 --name redis redis:7-alpine
@@ -156,9 +162,7 @@ docker run -d -p 6379:6379 --name redis redis:7-alpine
 go install github.com/asentric/asentric@latest
 ```
 
-### 3. Inisialisasi Project
-
-Buat project baru dengan CLI:
+### 3. Initialize Project
 
 ```bash
 asentric init my-protocol-monitor
@@ -166,72 +170,51 @@ cd my-protocol-monitor
 go mod tidy
 ```
 
-Ini akan menghasilkan struktur project standar:
+This generates:
 
 ```
 my-protocol-monitor/
 ├── config/
-│   ├── asentric.yaml      # Engine configuration
-│   ├── registry.yaml      # Target monitoring list (1 chain per project)
-│   └── runtime.yaml        # Runtime configuration (Redis, RPC, database)
+│   ├── asentric.yaml      # Runtime & engine config
+│   └── registry.yaml      # Target monitoring list
 ├── rules/
-│   ├── large_swap.go      # Custom rule
-│   └── upgrade.go         # Custom rule
+│   └── example_rule.go    # Custom rules
 ├── abi/
-│   └── contracts.json     # Contract ABIs
+│   └── .gitkeep
 ├── cmd/
 │   └── watcher/
-│       └── main.go        # Runtime entry point (you build this)
-└── fixtures/
-    └── example_tx.json     # Example fixture for replay
+│       └── main.go
+├── go.mod
+└── README.md
 ```
 
-### 4. Konfigurasi YAML
+### 4. Configure
 
-**config/asentric.yaml** - Engine behavior:
+**config/asentric.yaml:**
 ```yaml
-engine:
-  enabled_rules:
-    - large_swap_detection
-    - suspicious_transfer
-  
-  rule_options:
-    large_swap_detection:
-      threshold: "1000000000000000000"  # 1 ETH in wei
-  
-  execution:
-    max_rules_per_context: 100
-    timeout_ms: 5000
+chain:
+  rpc_ws: "wss://rpc.mantle.xyz/ws"
+  name: "Mantle"
+
+redis:
+  addr: "localhost:6379"
+
+webhook:
+  url: "https://your-webhook.com/alerts"
 ```
 
-**config/registry.yaml** - Target monitoring (1 chain per project):
+**config/registry.yaml:**
 ```yaml
 targets:
-  contracts:
-    - address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
-      name: "Uniswap V3 Router"
-      abi_path: "abi/uniswap_v3_router.json"
-      enabled: true
+  - address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+    name: "Uniswap V3 Router"
+    abi_path: "abi/uniswap_v3_router.json"
 ```
 
-**config/runtime.yaml** - Infrastructure runtime:
-```yaml
-runtime:
-  redis:
-    addr: "localhost:6379"
-  
-  rpc:
-    endpoint: "https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
-  
-  database:
-    enabled: false  # Optional - untuk save events/logs
-    type: "postgres"
-```
-
-### 5. Tulis Custom Rules
+### 5. Write Custom Rules
 
 ```go
-// rules/large_swap.go
+// rules/large_transfer.go
 package rules
 
 import (
@@ -239,77 +222,67 @@ import (
     "github.com/asentric/asentric/pkg/asentric"
 )
 
-type LargeSwapRule struct{}
-
-func (r *LargeSwapRule) Name() string {
-    return "large_swap_detection"
+type LargeTransferRule struct {
+    Threshold *big.Int
 }
 
-func (r *LargeSwapRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
+func (r *LargeTransferRule) Name() string {
+    return "large_transfer_detection"
+}
+
+func (r *LargeTransferRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
     tx := ctx.Tx()
-    threshold := big.NewInt(1000000000000000000) // 1 ETH
     
-    if tx.Value().Cmp(threshold) > 0 {
-        return &asentric.Alert{
-            Severity:    asentric.High,
-            Title:       "Large Swap Detected",
-            Description: "Transaction value exceeds threshold",
-            Metadata: map[string]interface{}{
-                "value":     tx.Value().String(),
-                "threshold": threshold.String(),
-            },
-            // Note: Ref (tx_hash, block_number) is populated by engine
-        }, nil
+    if tx.Value().Cmp(r.Threshold) > 0 {
+        return asentric.NewAlert(
+            r.Name(),
+            asentric.SeverityHigh,
+            "Large Transfer Detected",
+            "Transaction value exceeds threshold",
+        ).WithMetadata("value", tx.Value().String()).
+          WithMetadata("threshold", r.Threshold.String()), nil
     }
     
     return nil, nil
 }
 ```
 
-### 6. Setup Runtime
+### 6. Run
 
 ```go
 // cmd/watcher/main.go
 package main
 
 import (
+    "context"
+    "log"
+    "math/big"
+    
     "github.com/asentric/asentric/pkg/asentric"
+    "my-project/rules"
 )
 
 func main() {
-    // 1. Load runtime config (Redis config ada di runtime.yaml)
-    config := loadRuntimeConfig("config/runtime.yaml")
+    config, _ := asentric.LoadConfig("config/")
     
-    // 2. Setup engine
     engine := asentric.NewEngine()
-    engine.RegisterRule(&LargeSwapRule{})
+    engine.RegisterRule(&rules.LargeTransferRule{
+        Threshold: big.NewInt(1e18), // 1 ETH
+    })
     
-    // 3. Setup Database (optional - untuk save events/logs)
-    // var db *gorm.DB
-    // if config.Database.Enabled { ... }
-    
-    // 4. Start monitoring (framework handle Redis client)
-    watcher := asentric.NewWatcher(engine, config)
-    watcher.Start()
+    runtime := asentric.NewRuntime(config, engine)
+    if err := runtime.Start(context.Background()); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
-**Catatan:** Framework yang handle Redis client. Developer hanya perlu:
-- Setup Redis server (docker)
-- Konfigurasi di `runtime.yaml`
-- Framework otomatis connect ke Redis berdasarkan config
-
-### 7. Test & Run
-
 ```bash
-# Test offline dengan replay
-asentric replay --fixture fixtures/example_tx.json
-
-# Run runtime
 go run cmd/watcher/main.go
 ```
 
-> **📖 Lihat alur lengkap:** [docs/developer-overview.md](docs/developer-overview.md)
+> **📖 Full Guide:** [docs/developer-overview.md](docs/developer-overview.md)  
+> **🔒 Specification:** [docs/SPEC.md](docs/SPEC.md)
 
 ---
 
@@ -501,12 +474,11 @@ asentric/
 │   └── multi-chain/          # Example multi-chain setup
 │
 ├── docs/
-│   ├── developer-overview.md             # ⭐ Start here - Alur end-to-end developer
+│   ├── SPEC.md                           # ⭐ MVP Specification (SINGLE SOURCE OF TRUTH)
+│   ├── developer-overview.md             # Alur end-to-end developer
 │   ├── architecture.md                    # Architecture deep dive
 │   ├── sdk-api.md                        # Complete API reference
-│   ├── project-structure.md              # Final structure (authoritative)
-│   ├── final-architecture-recommendation.md  # Final architecture decision
-│   └── migration-roadmap.md              # Migration strategy
+│   └── project-structure.md              # Final structure (authoritative)
 │
 ├── go.mod
 ├── go.sum
@@ -612,11 +584,15 @@ See [LICENSE](LICENSE) for full details.
 
 ## Resources
 
-- **🚀 Start Here**: [docs/developer-overview.md](docs/developer-overview.md) - Alur end-to-end developer
-- **Documentation**: [docs/](docs/)
+- **🔒 MVP Specification**: [docs/SPEC.md](docs/SPEC.md) - **Single source of truth** (locked)
+- **📚 Memahami Code**: [docs/UNDERSTAND-PKG.md](docs/UNDERSTAND-PKG.md) - Dokumentasi pkg/asentric dan pkg/domain
+- **🔧 Implementation Guide**: [docs/IMPL-GUIDE.md](docs/IMPL-GUIDE.md) - Step-by-step build guide
+- **🚀 Quick Start**: [docs/developer-overview.md](docs/developer-overview.md) - End-to-end developer guide
+- **🏗️ Architecture**: [docs/architecture.md](docs/architecture.md) - Core architecture
+- **📋 API Reference**: [docs/sdk-api.md](docs/sdk-api.md) - Public API specification
+- **📁 Project Structure**: [docs/project-structure.md](docs/project-structure.md) - Folder structure
 - **Examples**: [examples/](examples/)
 - **Issue Tracker**: [GitHub Issues](https://github.com/asentric/asentric-sdk/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/asentric/asentric-sdk/discussions)
 
 ---
 

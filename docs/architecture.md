@@ -1,549 +1,767 @@
-# Architecture – Asentric SDK
+# Asentric Architecture
 
+> **🔒 Lihat MVP Spec:** [SPEC.md](SPEC.md) - **SINGLE SOURCE OF TRUTH** untuk hackathon  
 > **📖 Lihat alur developer:** [developer-overview.md](developer-overview.md) - Alur end-to-end penggunaan Asentric SDK
+
+**Status:** ✅ **Authoritative**  
+**Audience:** Core Engineers, Contributors, Reviewers
+
+**Jika terjadi konflik dengan [SPEC.md](SPEC.md), SPEC.md yang benar.**
+
+---
+
+## Table of Contents
+
+1. [Purpose & Scope](#1-purpose--scope)
+2. [Core Principles](#2-core-principles)
+3. [Non-Goals](#3-non-goals)
+4. [High-Level System Overview](#4-high-level-system-overview)
+5. [Canonical Data Flow](#5-canonical-data-flow)
+6. [Core Components & Responsibilities](#6-core-components--responsibilities)
+7. [Lifecycle Overview](#7-lifecycle-overview)
+8. [State & Determinism Model](#8-state--determinism-model)
+9. [Boundaries & Ownership](#9-boundaries--ownership)
+10. [Explicit Anti-Patterns](#10-explicit-anti-patterns)
+
+---
 
 ## 1. Purpose & Scope
 
-Asentric SDK adalah **framework untuk real-time smart contract security monitoring** yang memungkinkan developer:
+Asentric adalah SDK untuk real-time on-chain security alerting.
 
-* Mendefinisikan **apa yang dimonitor** melalui konfigurasi YAML
-* Menulis **logic deteksi sendiri** melalui custom rules (Go)
-* Menjalankan engine secara lokal atau di runtime mana pun
-* Menghasilkan alert yang bersifat semantik dan deterministik
+Dokumen ini mendefinisikan arsitektur inti dan batasan sistem.
 
-Asentric **bukan SaaS**, dan **bukan rule-engine berbasis YAML**. Asentric adalah **SDK + runtime pattern**.
+**Dokumen ini bersifat authoritative.**
 
-### Tanggung Jawab SDK
+Jika terjadi konflik antara implementasi dan dokumen ini, maka implementasi dianggap salah.
 
-SDK bertanggung jawab untuk:
+### Scope
 
-* Execute deterministic security rules
-* Process structured on-chain data
-* Produce structured alerts
+Asentric SDK menyediakan:
 
-SDK **tidak** bertanggung jawab untuk:
+* **Pure execution engine** untuk evaluasi security rules
+* **Deterministic rule system** yang menghasilkan alerts
+* **Infrastructure-agnostic core** yang dapat di-embed di berbagai runtime
 
-* Fetch blockchain data
-* Run long-lived watchers
-* Connect to Redis, Kafka, databases, or HTTP APIs
-* Deliver alerts
-* Manage configuration, deployment, or infrastructure
+Asentric SDK **tidak** menyediakan:
+
+* Chain data fetching
+* Infrastructure management (Redis, databases, HTTP servers)
+* Alert delivery mechanisms
+* Deployment tooling
 
 Tanggung jawab ini didelegasikan ke runtime (developer-built, self-hosted).
 
-SDK dirancang untuk **embedded**, bukan deployed.
+---
+
+## 2. Core Principles
+
+Asentric dibangun berdasarkan prinsip berikut:
+
+### 2.1 Stateless Engine
+
+* Engine tidak menyimpan state jangka panjang
+* Setiap evaluasi adalah independen
+* Tidak ada shared mutable state antar evaluasi
+
+### 2.2 Deterministic Rule Execution
+
+* Rule evaluation harus **pure dan deterministic**
+* Same input → same output, selalu
+* Tidak bergantung pada waktu, network, atau external state
+* Infrastructure tidak boleh mempengaruhi rule semantics
+
+### 2.3 Immutable Event & Context
+
+* Event adalah immutable snapshot dari chain data
+* Context adalah immutable snapshot dari event
+* Tidak ada mutasi selama evaluasi
+* Context hanya dibuat dari event, tidak dari sumber lain
+
+### 2.4 Clear Separation Between Public API and Internal Implementation
+
+* Public API hanya di `pkg/asentric`
+* Internal implementation di `internal/*`
+* Internal packages boleh depend ke `pkg/asentric`, **tidak pernah sebaliknya**
+* Public contracts harus stabil sebelum internal implementation
+
+### 2.5 Infrastructure-Agnostic Core
+
+* Engine tidak tahu tentang Redis, RPC, atau infrastructure lainnya
+* Infrastructure adalah runtime responsibility
+* Core hanya fokus pada domain logic
+
+### 2.6 Single-Threaded Engine Design
+
+* Engine **tidak concurrency-safe**
+* Engine mengeksekusi rules secara sequential
+* Parallelism adalah runtime responsibility
+
+**Catatan:** Prinsip-prinsip ini **harus konsisten** dengan roadmap yang sudah dikunci di [implementation-roadmap.md](implementation-roadmap.md).
 
 ---
 
-## 2. Architectural Philosophy
+## 3. Non-Goals
 
-### 2.1 Filosofi Desain
+Asentric secara eksplisit **TIDAK** bertujuan untuk:
 
-Asentric dibangun dengan prinsip berikut:
+### 3.1 Menjadi SIEM Lengkap
 
-* **YAML untuk konfigurasi, bukan logic** — Config hanya untuk setup engine & target list
-* **Rules adalah code, bukan config** — Semua logic deteksi ditulis dalam Go
-* **Engine deterministic & stateless** — Same input selalu menghasilkan same output
-* **Runtime bertanggung jawab atas side-effect** — RPC, database, alert delivery
-* **Developer bebas menentukan kompleksitas rules** — Dari simple threshold hingga ML integration
-* **Redis required** (seperti Ponder.sh butuh Postgres) — Untuk message queue & state management
-* **Database optional** (untuk save events/logs) — Developer choice
-* **1 project = 1 chain** (chain agnostic, tapi fokus 1 chain)
+* Tidak menyediakan query engine untuk historical data
+* Tidak menyediakan dashboard atau visualization
+* Tidak menyediakan alert aggregation atau correlation
 
-### 2.2 Pure Domain Core
+### 3.2 Menyimpan Historical State sebagai Source of Truth
 
-At its core, Asentric SDK follows a **pure domain logic** philosophy:
+* Engine tidak menyimpan state jangka panjang
+* Redis adalah transport, bukan state storage
+* Tidak ada persistent state di engine
 
-* Rules are pure functions
-* No side effects during rule evaluation
-* No global state
-* No I/O inside the engine
+### 3.3 Menyediakan Query Engine
 
-This guarantees:
+* Tidak ada query API untuk historical data
+* Tidak ada indexing atau search capabilities
+* Historical analysis adalah runtime/backend responsibility
 
-* Deterministic execution
-* Easy testing
-* Safe replay
-* Predictable behavior
+### 3.4 Menjadi Workflow Engine
 
-> **Note:** Conceptually, the SDK behaves like a pure function: given the same Context and rule set, it always produces the same alerts. This mathematical property enables deterministic replay and testing.
+* Tidak ada orchestration antar rules
+* Tidak ada dependency management antar rules
+* Rules adalah isolated units of logic
+
+### 3.5 Menyediakan Infrastructure Management
+
+* Tidak ada built-in Redis management
+* Tidak ada built-in RPC connection pooling
+* Tidak ada built-in database migrations
+* Infrastructure adalah developer responsibility
+
+**Tujuan bagian ini adalah membunuh ekspektasi sejak awal.**
 
 ---
 
-### 2.2 Infrastructure Inversion
+## 4. High-Level System Overview
 
-The SDK does not depend on infrastructure.
+Secara konseptual, Asentric terdiri dari:
 
-Instead:
+* **Engine**: orchestration & lifecycle
+* **Chain source**: penyedia event (via EventSource interface)
+* **Rule**: pure detection logic
+* **Alert sink**: external delivery (via AlertSink interface)
 
-* Infrastructure depends on the SDK
-* Runtime systems provide data **into** the SDK
-* The SDK produces results **outward**
-
-This is a strict, one-way dependency.
+### Diagram ASCII
 
 ```
-Infrastructure → SDK → Alerts
+[ Chain Source ] → [ EventSource ] → [ Engine ] → [ Rule ] → [ Alert ] → [ AlertSink ]
 ```
 
-This inversion prevents infrastructure concerns from leaking into security logic.
-
----
-
-### 2.3 Explicit Context Boundary
-
-All execution data flows through a single object: **Context**.
-
-Context is:
-
-* Explicit
-* Immutable during evaluation
-* Fully controlled by the runtime
-
-There is:
-
-* No hidden state
-* No global variables
-* No implicit dependencies
-
-This makes execution traceable, debuggable, and replayable.
-
----
-
-## 3. High-Level Architecture
+### Komponen Kunci
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              Asentric Framework Repository                    │
+│                    Asentric SDK Core                          │
 │                                                               │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         Framework Core (pkg/asentric)                │   │
-│  │         - Engine                                     │   │
-│  │         - Rules                                      │   │
-│  │         - Context                                    │   │
-│  │         - Alerts                                     │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                          │                                   │
-│                          │ Used by                           │
-│                          ▼                                   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         CLI Tools (cmd/asentric)                      │   │
-│  │         - init: Generate project                     │   │
-│  │         - replay: Test offline                       │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                               │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         Reference Runtime (cmd/runtime-reference)    │   │
-│  │         - Example implementation                     │   │
-│  │         - Not required, hanya contoh                 │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                               │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         Examples (examples/)                         │   │
-│  │         - simple-watcher                             │   │
-│  │         - custom-rules                               │   │
-│  │         - ml-integration                             │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                               │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          │ Used by
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│         Developer Project (Self-Hosted)                     │
-│                                                              │
-│  my-protocol-monitor/                                       │
-│  ├── config/                                                │
-│  │   ├── asentric.yaml      # Engine config                │
-│  │   ├── registry.yaml      # Target list (1 chain)         │
-│  │   └── runtime.yaml        # Runtime config (Redis, DB)   │
-│  ├── rules/                                                 │
-│  │   ├── custom_rule.go     # Developer rules             │
-│  │   └── ml_rule.go         # Custom ML rule               │
-│  ├── abi/                                                   │
-│  └── cmd/watcher/                                           │
-│      └── main.go            # Runtime (developer buat)     │
-│                                                              │
-│  Runtime Responsibilities:                                  │
-│  - Load runtime config (framework handle Redis client)       │
-│  - Connect to RPC (developer choice)                        │
-│  - Setup Database (optional - untuk save events/logs)      │
-│  - Parse config & registry                                  │
-│  - Setup engine                                             │
-│  - Register rules                                           │
-│  - Monitoring loop                                          │
-│  - Alert delivery (developer choice)                         │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
+│  │   Engine     │───▶│    Rule      │───▶│    Alert     │  │
+│  │ (orchestrate)│    │  (detection) │    │   (output)   │  │
+│  └──────────────┘    └──────────────┘    └──────────────┘  │
+│         │                    │                    │          │
+│         │                    │                    │          │
+│         ▼                    ▼                    ▼          │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
+│  │   Context    │    │ EventSource  │    │  AlertSink   │  │
+│  │ (immutable)  │    │  (interface) │    │  (interface)  │  │
+│  └──────────────┘    └──────────────┘    └──────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The SDK provides the **core detection logic**, while external systems handle:
-
-* **Runtime** (Self-hosted): Chain monitoring, transaction ingestion, alert routing (developer builds)
-* **Backend**: REST API, data aggregation, persistence
-* **Frontend**: User interface, dashboards, visualization
-
-The SDK is a **closed execution box** that processes Context and produces Alerts.
-
-**Note:** Developers build their own runtime (self-hosted). The reference runtime (`cmd/runtime-reference/`) is provided as an example, not a requirement.
-
 ---
 
-## 4. Core Components
+## 5. Canonical Data Flow
 
-### 4.1 Engine
+**INI BAGIAN PALING KRITIS**
 
-The Engine is responsible for:
-
-* Managing rule registration
-* Iterating over rules
-* Executing rules against a given Context
-* Collecting produced alerts
-
-The Engine:
-
-* Has no knowledge of chains, RPCs, or infrastructure
-* Does not manage concurrency or scheduling
-* Executes rules sequentially and deterministically
-
-Conceptually:
+Alur data canonical Asentric adalah:
 
 ```
-for each rule:
-  alert = rule.Evaluate(ctx)
-  collect(alert)
+Chain Event
+  → Internal Event (via EventSource)
+    → Context (immutable snapshot)
+      → Rule Evaluation
+        → Alert (optional)
+          → AlertSink
 ```
 
----
+### Step-by-Step Breakdown
 
-### 4.2 Rule System
+#### Step 1: Chain Event
 
-Rules represent **security knowledge**.
+* Raw data dari blockchain (block, log, transaction)
+* Disediakan oleh runtime melalui EventSource interface
 
-A rule:
+#### Step 2: Internal Event
 
-* Encapsulates one detection idea
-* Is stateless
-* Is deterministic
+* Event yang sudah di-normalize oleh EventSource
+* Masih belum menjadi Context
 
-Rules:
+#### Step 3: Context (Immutable Snapshot)
 
-* Never perform I/O
-* Never mutate external state
-* Never communicate with other rules
+* Context dibuat dari Event
+* Context adalah immutable snapshot
+* Context tidak boleh dimutasi selama evaluasi
 
-Rules are **isolated units of logic**.
+#### Step 4: Rule Evaluation
 
-This isolation guarantees:
+* Engine mengeksekusi rules terhadap Context
+* Setiap rule adalah pure function
+* Rule hanya membaca Context, tidak memutasi
 
-* Safety
-* Parallel reasoning
-* Simple testing
+#### Step 5: Alert (Optional)
 
----
+* Rule menghasilkan maksimal satu Alert per evaluasi
+* Alert adalah output akhir dari rule
+* Alert tidak memiliki side-effect
 
-### 4.3 Context
+#### Step 6: AlertSink
 
-Context is the **single source of truth** during execution.
+* Alert dikirim ke AlertSink interface
+* AlertSink adalah external delivery mechanism
+* AlertSink adalah runtime responsibility
 
-It contains:
+### Rules (WAJIB DIPATUHI)
 
-* Transaction data
-* Block metadata
-* Decoded logs / events
-* Chain-specific information
+* ✅ **Tidak boleh lompat step** — Setiap step harus dijalankan secara berurutan
+* ✅ **Context hanya dibuat dari event** — Context tidak boleh dibuat dari sumber lain
+* ✅ **Rule hanya membaca context** — Rule tidak boleh memutasi Context atau melakukan I/O
+* ✅ **Alert hanya dari rule** — Alert hanya bisa dihasilkan oleh rule evaluation
 
-Context:
-
-* Is constructed by the runtime
-* Is passed into the SDK
-* Is read-only during evaluation
-
-> **Note:** The SDK assumes Context is valid and complete. Context validation and enrichment (e.g., fetching missing data, decoding events) is the runtime's responsibility. The SDK does not validate or enrich Context.
+**Jika bagian ini kabur → TIER 0 gagal.**
 
 ---
 
-### 4.4 Alerts
+## 6. Core Components & Responsibilities
 
-Alerts are the **only output** of the SDK.
+### 6.1 Engine
 
-An alert is:
+**Tanggung Jawab:**
 
-* Structured
-* Serializable
-* Infrastructure-agnostic
+* Mengelola lifecycle (start, stop, shutdown)
+* Mengatur subscription ke EventSource
+* Menjalankan rule evaluation terhadap Context
+* Mengumpulkan alerts dari rules
+* Mengirim alerts ke AlertSink
 
-Alerts do not:
+**Tidak Bertanggung Jawab:**
 
-* Know where they will be sent
-* Know how they will be stored
-* Contain delivery logic
+* ❌ Fetch chain data
+* ❌ Manage infrastructure (Redis, RPC, database)
+* ❌ Deliver alerts (hanya mengirim ke AlertSink)
+* ❌ Manage concurrency (engine adalah single-threaded)
 
-The SDK produces alerts — it does not deliver them.
+**Invariants:**
 
-#### Execution Reference
+* Engine adalah stateless
+* Engine mengeksekusi rules secara sequential
+* Engine tidak tahu tentang infrastructure
 
-Alerts may include an optional `ExecutionRef` containing:
+### 6.2 Rule
 
-* Transaction hash (`tx_hash`)
-* Block number (`block_number`)
+**Tanggung Jawab:**
 
-**Important distinctions:**
+* Pure function terhadap Context
+* Mendeteksi security patterns
+* Menghasilkan maksimal satu Alert per evaluasi
 
-* **Alert ≠ delivery envelope** — Alerts are semantic signals, not infrastructure messages
-* **ExecutionRef ≠ infrastructure metadata** — It contains only execution traceability, not chain identity, network, or RPC endpoints
-* **Chain identity remains external** — Runtime systems are responsible for chain context (chain ID, network name, etc.)
+**Tidak Bertanggung Jawab:**
 
-The `ExecutionRef` is:
+* ❌ Melakukan I/O (network, file, database)
+* ❌ Memutasi external state
+* ❌ Berkomunikasi dengan rules lain
+* ❌ Mengetahui tentang infrastructure
 
-* Populated by the engine (not by rules)
-* Not accessible or modifiable by rules
-* Optional and informational only
-* Can be overridden or enriched by runtime systems
+**Invariants:**
 
-This design maintains:
+* Rule adalah pure function
+* Rule tidak memiliki side effects
+* Rule adalah deterministic
+* Rule adalah isolated unit of logic
 
-* **Rule purity** — Rules remain unaware of execution context
-* **Alert semantics** — Alerts stay focused on security signals
-* **Runtime ownership** — Runtime controls all infrastructure and chain context
+### 6.3 Context
+
+**Tanggung Jawab:**
+
+* Menyediakan immutable snapshot dari event
+* Menyediakan akses ke transaction data, block metadata, decoded logs
+* Menjadi single source of truth selama evaluasi
+
+**Tidak Bertanggung Jawab:**
+
+* ❌ Memvalidasi data (runtime responsibility)
+* ❌ Meng-enrich data (runtime responsibility)
+* ❌ Menyimpan state jangka panjang
+
+**Invariants:**
+
+* Context adalah immutable
+* Context hanya dibuat dari event
+* Context tidak mengandung behavior
+* Context tidak boleh dimutasi selama evaluasi
+
+### 6.4 Alert
+
+**Tanggung Jawab:**
+
+* Menyediakan structured output dari rule
+* Menyediakan severity level (Critical, High, Medium, Low, Info)
+* Menyediakan metadata untuk debugging
+
+**Tidak Bertanggung Jawab:**
+
+* ❌ Mengetahui bagaimana alert akan dikirim
+* ❌ Mengetahui bagaimana alert akan disimpan
+* ❌ Mengandung delivery logic
+
+**Invariants:**
+
+* Alert adalah serializable
+* Alert adalah infrastructure-agnostic
+* Alert tidak memiliki side-effect
+* Alert adalah output akhir dari rule
+
+### 6.5 EventSource
+
+**Tanggung Jawab:**
+
+* Menyediakan interface untuk chain data ingestion
+* Menyediakan subscription mechanism untuk events
+* Menyediakan normalized event format
+
+**Tidak Bertanggung Jawab:**
+
+* ❌ Implementasi chain client (internal responsibility)
+* ❌ State management (runtime responsibility)
+
+**Invariants:**
+
+* EventSource adalah interface (public API)
+* Chain clients adalah internal implementation
+* EventSource tidak tahu tentang infrastructure
+
+### 6.6 AlertSink
+
+**Tanggung Jawab:**
+
+* Menyediakan interface untuk alert delivery
+* Menyediakan mechanism untuk mengirim alerts ke external systems
+
+**Tidak Bertanggung Jawab:**
+
+* ❌ Implementasi delivery mechanism (runtime responsibility)
+* ❌ Alert storage (runtime responsibility)
+
+**Invariants:**
+
+* AlertSink adalah interface (public API)
+* Delivery mechanisms adalah runtime responsibility
+* AlertSink tidak tahu tentang infrastructure details
+
+### 6.7 Dispatcher
+
+**Tanggung Jawab:**
+
+* Mengirim event ke engine untuk diproses
+* Mengorkestrasi rule evaluation terhadap Context
+* Menghubungkan EventSource dengan Engine
+
+**Tidak Bertanggung Jawab:**
+
+* ❌ Implementasi rule logic (Rule responsibility)
+* ❌ Chain data fetching (EventSource responsibility)
+* ❌ Alert delivery (AlertSink responsibility)
+
+**Invariants:**
+
+* Dispatcher adalah komponen internal (bukan public API)
+* Dispatcher dapat berubah bebas tanpa breaking change
+* Dispatcher adalah adapter antara EventSource dan Engine
+
+**Catatan:** Dispatcher adalah komponen internal yang bertanggung jawab untuk mengirim event ke engine dan mengorkestrasi rule evaluation. Dispatcher bukan public API dan dapat berubah bebas tanpa mempengaruhi kontrak publik.
 
 ---
 
-## 5. Package Structure & Boundaries
+## 7. Lifecycle Overview
 
-### 5.1 Public API (`pkg/asentric`)
+### Engine Lifecycle
 
-This is the **only supported integration surface**.
+```
+INIT → STARTING → RUNNING → STOPPING → STOPPED
+```
 
-Contains:
+### State Transitions
 
-* Engine
+#### INIT
+
+* Engine dalam state awal
+* Belum ada subscription
+* Belum ada rule yang terdaftar
+
+#### STARTING
+
+* Engine sedang memulai lifecycle
+* Subscription ke EventSource sedang dibuat
+* Rules sedang di-register
+
+#### RUNNING
+
+* Engine aktif memproses events
+* Rules sedang dievaluasi
+* Alerts sedang dihasilkan
+
+#### STOPPING
+
+* Engine sedang menghentikan operasi
+* Subscription sedang di-unsubscribe
+* Graceful shutdown sedang dilakukan
+
+#### STOPPED
+
+* Engine sudah berhenti
+* Tidak ada operasi yang berjalan
+* State sudah dibersihkan
+
+### Aturan Lifecycle
+
+* ✅ **Start hanya valid dari INIT** — Engine tidak bisa start dari state lain
+* ✅ **Stop idempotent** — Memanggil stop beberapa kali tidak menyebabkan error
+* ✅ **Tidak ada restart implisit** — Setelah stop, engine harus dibuat ulang untuk restart
+* ✅ **Graceful shutdown** — Engine harus menyelesaikan evaluasi yang sedang berjalan sebelum stop
+
+### Failure Semantics
+
+Jika rule menghasilkan error selama evaluasi:
+
+* **Engine boleh stop atau skip** — Policy ditentukan oleh runtime, bukan engine
+* **Engine tidak retry secara otomatis** — Retry adalah runtime responsibility
+* **Error tidak mempengaruhi determinism** — Error adalah output yang deterministic dari rule evaluation
+
+**Catatan:** Ini hanya mengunci ekspektasi tentang behavior engine saat terjadi error. Implementasi spesifik (stop vs skip, error handling strategy) adalah runtime responsibility.
+
+---
+
+## 8. State & Determinism Model
+
+### 8.1 Engine Bersifat Stateless
+
+Engine tidak menyimpan state jangka panjang:
+
+* Tidak ada persistent state di engine
+* Tidak ada shared mutable state antar evaluasi
+* Setiap evaluasi adalah independen
+
+### 8.2 Rule Harus Deterministic
+
+Semua rule harus deterministic:
+
+* **Input sama → output sama** — Same Context dan rule set selalu menghasilkan same alerts
+* **Tidak bergantung pada waktu** — Rule tidak boleh menggunakan `time.Now()` atau timestamp
+* **Tidak bergantung pada network** — Rule tidak boleh melakukan network calls
+* **Tidak bergantung pada external state** — Rule tidak boleh membaca dari database atau external systems
+
+### 8.3 Context Adalah Immutable Snapshot
+
+Context adalah immutable snapshot dari event:
+
+* Context tidak boleh dimutasi selama evaluasi
+* Context hanya dibuat dari event, tidak dari sumber lain
+* Context tidak mengandung mutable state
+
+### 8.4 Kenapa Ini Penting
+
+**Untuk Scaling:**
+
+* Stateless engine memungkinkan horizontal scaling
+* Deterministic rules memungkinkan parallel execution
+* Immutable context memungkinkan safe concurrent access
+
+**Untuk Replay:**
+
+* Deterministic execution memungkinkan replay dari fixtures
+* Stateless engine memungkinkan replay tanpa side effects
+* Immutable context memungkinkan replay dengan confidence
+
+**Untuk Testing:**
+
+* Deterministic rules mudah di-test
+* Stateless engine tidak memerlukan complex test setup
+* Immutable context memungkinkan isolated testing
+
+---
+
+## 9. Boundaries & Ownership
+
+### 9.1 Public API (`pkg/asentric`)
+
+**Ownership:**
+
+* Public API adalah **satu-satunya** integration surface yang didukung
+* Public API adalah stable dan versioned
+* Breaking changes memerlukan semver bump
+
+**Contains:**
+
+* Engine interface
 * Rule interface
 * Context interface
 * Alert model
+* EventSource interface
+* AlertSink interface
+* Dispatcher interface
+* Error types
 
-Stability guarantees:
+**Invariants:**
 
-* Backward compatibility
-* Semver-managed changes
+* ✅ Stable & versioned
+* ✅ Backward compatible (semver-managed)
+* ✅ Safe to depend on
+* ❌ No infrastructure code
+* ❌ No internal implementation details
 
-If it lives in `pkg/asentric`, it is safe to depend on.
+### 9.2 Internal Implementation (`internal/*`)
 
----
+**Ownership:**
 
-### 5.2 Internal Implementation (`internal/`)
+* Internal implementation adalah private
+* Internal implementation bebas berubah tanpa breaking change
+* Internal implementation tidak boleh di-import oleh user
 
-Everything under `internal/` is:
+**Contains:**
 
-* Private
-* Non-stable
-* Free to change
+* Rule execution internals (`internal/rule/`)
+* Runtime helpers (`internal/runtime/`)
+* Chain clients (`internal/chain/`)
+* ABI decoding logic (`internal/abi/`)
+* Alert formatting (`internal/alert/`)
 
-Contains:
+**Invariants:**
 
-* Rule execution internals
-* Runtime helpers
-* ABI decoding logic
+* ✅ Private (tidak boleh di-import oleh user)
+* ✅ Non-stable (bebas berubah)
+* ✅ Free to change tanpa breaking change
+* ✅ Boleh depend ke `pkg/asentric`
+* ❌ Tidak boleh di-depend oleh `pkg/asentric`
 
-External systems must never import from `internal/`.
+### 9.3 Larangan Eksplisit
 
----
+**WAJIB DIPATUHI:**
 
-### 5.3 CLI (`cmd/asentric`)
-
-The CLI is a **developer tool**, not a runtime.
-
-It is used for:
-
-* Project scaffolding
-* Rule testing
-* Offline replay
-
-The CLI:
-
-* Does not connect to RPC nodes
-* Does not run production watchers
-* Does not manage long-lived processes
-
-It exists purely to improve developer experience.
-
----
-
-## 6. Runtime Responsibility Matrix
-
-| Responsibility   | SDK          | Runtime |
-| ---------------- | ------------ | ------- |
-| Fetch chain data | ❌            | ✅       |
-| Decode ABI       | ⚠️ (internal helpers only) | ✅ (full decoding) |
-| Rule execution   | ✅            | ❌       |
-| Alert creation   | ✅            | ❌       |
-| Alert delivery   | ❌            | ✅       |
-| Persistence      | ❌            | ✅       |
-| Scheduling       | ❌            | ✅       |
-| Scaling          | ❌            | ✅       |
-
-> **Note:** The SDK provides ABI decoding helpers in `internal/abi/` for internal use, but full ABI decoding and event parsing is the runtime's responsibility. The SDK uses these helpers internally but does not expose them as part of the public API.
-
-The SDK never crosses its boundary.
+* ❌ **User tidak boleh import dari `internal/*`** — Hanya `pkg/asentric` yang boleh di-import
+* ❌ **Internal tidak boleh di-depend oleh public API** — Dependency hanya satu arah: `internal/*` → `pkg/asentric`
+* ❌ **Infrastructure tidak boleh bocor ke public API** — Public API tidak boleh mengandung Redis, RPC, atau infrastructure lainnya
 
 ---
 
-## 7. Determinism & Replay
+## 10. Explicit Anti-Patterns
 
-Determinism is a core invariant.
+Anti-pattern berikut **dilarang** dan akan menyebabkan refactor besar:
 
-Given:
+### 10.1 Rule Melakukan Network Call
 
-* The same Context
-* The same rule set
+**❌ DILARANG:**
 
-The SDK guarantees:
-
-* Identical outputs
-* No hidden state
-* No time-based behavior
-
-Replay works by:
-
-* Reconstructing Context from fixtures
-* Running the engine offline
-
-The SDK **never fetches historical data**.
-
----
-
-## 9. Ecosystem Integration
-
-The Asentric SDK is designed to be embedded into multiple runtime environments:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│              Asentric Framework Repository                    │
-│                                                               │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         Framework Core (pkg/asentric)                │   │
-│  │         - Engine                                     │   │
-│  │         - Rules                                      │   │
-│  │         - Context                                    │   │
-│  │         - Alerts                                     │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                          │                                   │
-│                          │ Used by                           │
-│                          ▼                                   │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         CLI Tools (cmd/asentric)                      │   │
-│  │         - init: Generate project                     │   │
-│  │         - replay: Test offline                       │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                               │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         Reference Runtime (cmd/runtime-reference)    │   │
-│  │         - Example implementation                     │   │
-│  │         - Not required, hanya contoh                 │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                               │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         Examples (examples/)                         │   │
-│  │         - simple-watcher                             │   │
-│  │         - custom-rules                               │   │
-│  │         - ml-integration                             │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                               │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          │ Used by
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│         Developer Project (Self-Hosted)                     │
-│                                                              │
-│  Runtime Responsibilities:                                  │
-│  - Load runtime config (framework handle Redis client)       │
-│  - Connect to RPC (developer choice)                        │
-│  - Setup Database (optional - untuk save events/logs)      │
-│  - Parse config & registry                                  │
-│  - Setup engine                                             │
-│  - Register rules                                           │
-│  - Monitoring loop                                          │
-│  - Alert delivery (developer choice)                         │
-└─────────────────────────────────────────────────────────────┘
+```go
+func (r *MyRule) Evaluate(ctx Context) (*Alert, error) {
+    // DILARANG: Network call di dalam rule
+    resp, err := http.Get("https://api.example.com/data")
+    // ...
+}
 ```
 
-### Component Roles
+**✅ BENAR:**
 
-| Component | Role | Uses SDK For |
-|-----------|------|--------------|
-| **SDK** | Security logic & detection | N/A (core library) |
-| **Runtime** | Self-hosted watcher (developer builds) | Rule execution, alert generation |
-| **Backend** | API, aggregation, persistence | Alert processing, historical analysis |
-| **Frontend** | Visualization & dashboard | N/A (consumes Backend API) |
-| **CLI** | Development & testing tools (not a runtime) | Replay, rule validation |
-| **Reference Runtime** | Example implementation | Reference for developers (not required) |
-
-The SDK remains the **single source of truth** for security detection logic.
-
-**Note:** Developers build their own runtime (self-hosted). The reference runtime (`cmd/runtime-reference/`) is provided as an example, not a requirement.
-
----
-
-## 10. Infrastructure Requirements
-
-### Required: Redis (Setup Awal)
-
-**Like Ponder.sh requires Postgres, Asentric requires Redis for:**
-- ✅ Message queue (watcher → processor)
-- ✅ State management (processed blocks)
-- ✅ Worker coordination (multi-worker)
-- ✅ Alert queue (processor → alert handler)
-
-**Setup:**
-```bash
-docker run -d -p 6379:6379 --name redis redis:7-alpine
+```go
+func (r *MyRule) Evaluate(ctx Context) (*Alert, error) {
+    // BENAR: Rule hanya membaca dari Context
+    data := ctx.GetData()
+    // ...
+}
 ```
 
-### Optional: Database (Save Events/Logs)
+**Alasan:** Rule harus pure dan deterministic. Network call membuat rule non-deterministic dan sulit di-test.
 
-**You can choose a database for:**
-- ⚠️ Saving events/transactions/logs
-- ⚠️ Historical data storage
-- ⚠️ Analytics & reporting
+### 10.2 Engine Menyimpan State Jangka Panjang
 
-**Options:**
-- PostgreSQL (relational)
-- MongoDB (document)
-- InfluxDB (time-series)
-- ClickHouse (analytics)
+**❌ DILARANG:**
 
-**Lihat detail:** [developer-overview.md](developer-overview.md#1-setup-infrastructure--instalasi)
+```go
+type Engine struct {
+    processedBlocks map[string]bool  // DILARANG: State jangka panjang
+    alertHistory    []Alert          // DILARANG: State jangka panjang
+}
+```
+
+**✅ BENAR:**
+
+```go
+type Engine struct {
+    rules []Rule  // BENAR: Hanya menyimpan rules
+    // State jangka panjang adalah runtime responsibility
+}
+```
+
+**Alasan:** Engine harus stateless untuk memungkinkan scaling dan replay.
+
+### 10.3 Infrastruktur (Redis, RPC) Bocor ke Public API
+
+**❌ DILARANG:**
+
+```go
+// DILARANG: Redis di public API
+package asentric
+
+type Engine struct {
+    redis *redis.Client  // DILARANG
+}
+```
+
+**✅ BENAR:**
+
+```go
+// BENAR: Redis di internal atau runtime
+package internal
+
+type Runtime struct {
+    redis *redis.Client  // BENAR: Di internal
+}
+```
+
+**Alasan:** Public API harus infrastructure-agnostic. Infrastructure adalah runtime responsibility.
+
+### 10.4 Business Logic di CLI
+
+**❌ DILARANG:**
+
+```go
+// DILARANG: Business logic di CLI
+func main() {
+    engine := NewEngine()
+    engine.Start()  // DILARANG: CLI tidak boleh run engine
+}
+```
+
+**✅ BENAR:**
+
+```go
+// BENAR: CLI hanya untuk scaffolding dan testing
+func main() {
+    if cmd == "init" {
+        scaffoldProject()  // BENAR: Scaffolding
+    } else if cmd == "replay" {
+        replayFixture()    // BENAR: Testing
+    }
+}
+```
+
+**Alasan:** CLI adalah developer tool, bukan runtime. Business logic harus di runtime.
+
+### 10.5 Context Dimutasi Selama Evaluasi
+
+**❌ DILARANG:**
+
+```go
+func (r *MyRule) Evaluate(ctx Context) (*Alert, error) {
+    ctx.SetData(newData)  // DILARANG: Mutasi Context
+    // ...
+}
+```
+
+**✅ BENAR:**
+
+```go
+func (r *MyRule) Evaluate(ctx Context) (*Alert, error) {
+    data := ctx.GetData()  // BENAR: Hanya membaca Context
+    // ...
+}
+```
+
+**Alasan:** Context harus immutable untuk memastikan determinism dan safe concurrent access.
+
+### 10.6 Rule Berkomunikasi dengan Rules Lain
+
+**❌ DILARANG:**
+
+```go
+var globalState = make(map[string]interface{})
+
+func (r *Rule1) Evaluate(ctx Context) (*Alert, error) {
+    globalState["key"] = "value"  // DILARANG: Shared state
+}
+
+func (r *Rule2) Evaluate(ctx Context) (*Alert, error) {
+    value := globalState["key"]  // DILARANG: Membaca shared state
+}
+```
+
+**✅ BENAR:**
+
+```go
+func (r *Rule1) Evaluate(ctx Context) (*Alert, error) {
+    // BENAR: Rule isolated, tidak ada shared state
+    data := ctx.GetData()
+    // ...
+}
+```
+
+**Alasan:** Rules harus isolated untuk memastikan determinism dan parallel execution.
+
+### 10.7 Alert Mengandung Delivery Logic
+
+**❌ DILARANG:**
+
+```go
+type Alert struct {
+    Message string
+    SendToSlack() error  // DILARANG: Delivery logic di Alert
+}
+```
+
+**✅ BENAR:**
+
+```go
+type Alert struct {
+    Message string  // BENAR: Alert hanya data
+    // Delivery logic di AlertSink
+}
+```
+
+**Alasan:** Alert harus infrastructure-agnostic. Delivery adalah AlertSink responsibility.
 
 ---
 
-## 11. Architectural Non-Goals
+## Related Documentation
 
-The following will **never** be added to the SDK:
-
-* RPC clients
-* HTTP servers
-* Alert delivery
-* Deployment tooling
-
-**Note:** While Redis is required for runtime setup (like Ponder.sh requires Postgres), framework yang handle Redis client connection. Developer hanya perlu konfigurasi di `runtime.yaml`, dan framework otomatis connect ke Redis berdasarkan config.
-
-If a feature requires infrastructure, it does not belong here.
+* **[SPEC.md](SPEC.md)** - MVP specification (authoritative)
+* **[project-structure.md](project-structure.md)** - Final project structure
+* **[sdk-api.md](sdk-api.md)** - Complete API reference
+* **[developer-overview.md](developer-overview.md)** - Developer end-to-end guide
 
 ---
 
-## 12. Summary
+## Summary
 
-Asentric SDK is:
+Asentric Architecture adalah:
 
-* A pure execution engine
-* Infrastructure-agnostic
-* Deterministic and testable
-* Designed for embedding
-* **1 Repository (Monorepo)** - Framework + CLI + Examples + Reference Runtime
-* **Self-hosted** - Developer builds runtime
-* **Redis required** - For setup (like Ponder.sh needs Postgres)
-* **Database optional** - For saving events/logs
+* ✅ **Stateless** — Engine tidak menyimpan state jangka panjang
+* ✅ **Deterministic** — Rules selalu menghasilkan output yang sama untuk input yang sama
+* ✅ **Immutable** — Context adalah immutable snapshot
+* ✅ **Infrastructure-Agnostic** — Core tidak tahu tentang infrastructure
+* ✅ **Single-Threaded** — Engine mengeksekusi rules secara sequential
+* ✅ **Pure** — Rules adalah pure functions tanpa side effects
 
-It exists to make **security logic simple, safe, and reusable**.
+**Dokumen ini bersifat authoritative.**
 
-Everything else belongs elsewhere.
+Jika terjadi konflik antara implementasi dan dokumen ini, maka implementasi dianggap salah.
+
+---
+
+**Last Updated:** 2024  
+**Version:** 1.0 (FINAL)
