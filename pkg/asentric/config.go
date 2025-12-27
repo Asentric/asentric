@@ -1,6 +1,8 @@
 package asentric
 
 import (
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -11,6 +13,26 @@ type RuntimeConfig struct {
 	Redis   RedisConfig   `yaml:"redis"`
 	Webhook WebhookConfig `yaml:"webhook"`
 	Engine  EngineConfig  `yaml:"engine"`
+	Debug   bool          `yaml:"debug"`
+}
+
+// Validate checks if the configuration is valid.
+func (c *RuntimeConfig) Validate() error {
+
+	if c == nil {
+		return ErrInvalidConfig
+	}
+
+	if err := validateChainConfig(c.Chain); err != nil {
+		return err
+	}
+	if err := validateRedisConfig(c.Redis); err != nil {
+		return err
+	}
+	if err := validateWebhookConfig(c.Webhook); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ChainConfig holds chain-specific configuration.
@@ -84,4 +106,48 @@ type TargetConfig struct {
 	// ABIPath is the path to the ABI JSON file (required)
 	// Example: "abi/uniswap_v3.json"
 	ABIPath string `yaml:"abi_path"`
+}
+
+func (r *RuntimeConfig) ApplyDefaults() {
+	if r.Redis.PoolSize == 0 {
+		r.Redis.PoolSize = 10
+	}
+	if r.Webhook.Timeout == 0 {
+		r.Webhook.Timeout = 10 * time.Second
+	}
+	if r.Webhook.RetryCount == 0 {
+		r.Webhook.RetryCount = 3
+	}
+}
+
+// validateChainConfig validates chain configuration.
+func validateChainConfig(chain ChainConfig) error {
+	if chain.RPCWS == "" {
+		return fmt.Errorf("%w: chain.rpc_ws is required", ErrInvalidChainConfig)
+	}
+
+	if !strings.HasPrefix(chain.RPCWS, "ws://") && !strings.HasPrefix(chain.RPCWS, "wss://") {
+		return fmt.Errorf("%w: chain.rpc_ws must be ws:// or wss://", ErrInvalidChainConfig)
+	}
+
+	if chain.Name == "" {
+		return fmt.Errorf("%w: chain.name is required", ErrInvalidChainConfig)
+	}
+	return nil
+}
+
+// validateRedisConfig validates Redis configuration.
+func validateRedisConfig(redis RedisConfig) error {
+	if redis.Addr == "" {
+		return fmt.Errorf("%w: redis.addr is required", ErrInvalidRedisConfig)
+	}
+	return nil
+}
+
+// validateWebhookConfig validates webhook configuration.
+func validateWebhookConfig(webhook WebhookConfig) error {
+	if webhook.URL == "" {
+		return fmt.Errorf("%w: webhook.url is required", ErrInvalidWebhookConfig)
+	}
+	return nil
 }
