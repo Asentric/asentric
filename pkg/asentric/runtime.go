@@ -99,7 +99,7 @@ func NewRuntime(cfg *RuntimeConfig, engine *Engine) (*Runtime, error) {
 	rt := &Runtime{
 		config:   cfg,
 		engine:   engine,
-		logger:   NewDefaultLogger(cfg.Debug),
+		logger:   NewStdLogger(nil, cfg.Debug),
 		shutdown: make(chan struct{}),
 		done:     make(chan struct{}),
 	}
