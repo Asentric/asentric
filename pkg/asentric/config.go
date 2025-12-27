@@ -2,6 +2,7 @@ package asentric
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -107,11 +108,28 @@ type TargetConfig struct {
 	ABIPath string `yaml:"abi_path"`
 }
 
+func (r *RuntimeConfig) ApplyDefaults() {
+	if r.Redis.PoolSize == 0 {
+		r.Redis.PoolSize = 10
+	}
+	if r.Webhook.Timeout == 0 {
+		r.Webhook.Timeout = 10 * time.Second
+	}
+	if r.Webhook.RetryCount == 0 {
+		r.Webhook.RetryCount = 3
+	}
+}
+
 // validateChainConfig validates chain configuration.
 func validateChainConfig(chain ChainConfig) error {
 	if chain.RPCWS == "" {
 		return fmt.Errorf("%w: chain.rpc_ws is required", ErrInvalidChainConfig)
 	}
+
+	if !strings.HasPrefix(chain.RPCWS, "ws://") && !strings.HasPrefix(chain.RPCWS, "wss://") {
+		return fmt.Errorf("%w: chain.rpc_ws must be ws:// or wss://", ErrInvalidChainConfig)
+	}
+
 	if chain.Name == "" {
 		return fmt.Errorf("%w: chain.name is required", ErrInvalidChainConfig)
 	}

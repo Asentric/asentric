@@ -203,6 +203,10 @@ func (r *Runtime) validateDependencies() error {
 	return nil
 }
 
+func (r *Runtime) ApplyDefaults() {
+	r.config.ApplyDefaults()
+}
+
 // Stop gracefully stops the runtime.
 func (r *Runtime) Stop(ctx context.Context) error {
 	r.logger.Info("Stopping runtime...")
