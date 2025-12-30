@@ -5,25 +5,35 @@ import (
 	"github.com/asentric/asentric/pkg/domain"
 )
 
-// ContextBuilder is responsible for converting an Event into an Engine Context.
+// ContextBuilder defines how an Event is transformed into an Engine Context.
 //
-// This abstraction allows different implementations to customize how raw
-// events (e.g. blockchain logs, transactions, or external signals) are
-// transformed into a structured Context that can be evaluated by the Engine.
+// This abstraction decouples event ingestion from rule evaluation logic,
+// allowing different implementations to:
+//   - Decode raw event payloads
+//   - Enrich events with on-chain / off-chain metadata
+//   - Prepare a normalized Context for Engine evaluation
+//
+// Implementations must return a fully-initialized Context suitable for
+// Engine.Evaluate.
 type ContextBuilder interface {
-	// Build creates an asentric.Context from the given Event.
+	// Build converts the given Event into an asentric.Context.
 	//
-	// The returned Context will later be passed to Engine.Evaluate.
+	// The returned Context is passed directly to Engine.Evaluate and must
+	// contain all data required by registered rules.
 	Build(event asentric.Event) asentric.Context
 }
 
-// EngineDispatcher dispatches incoming Events to the rule Engine.
+// EngineDispatcher routes incoming Events to the rule Engine.
 //
-// It acts as a bridge between an EventSource and the Engine by:
-//  1. Receiving an Event
-//  2. Building a Context using ContextBuilder
-//  3. Evaluating rules via the Engine
+// EngineDispatcher acts as the orchestration layer between an EventSource
+// and the Engine by performing the following steps:
+//  1. Accepting an incoming Event
+//  2. Building an evaluation Context via ContextBuilder
+//  3. Evaluating rules using Engine.Evaluate
 //  4. Emitting generated Alerts through AlertSink
+//
+// The dispatcher itself contains no business logic and is designed to be
+// lightweight, deterministic, and easy to test.
 type EngineDispatcher struct {
 	engine         *asentric.Engine
 	alertSink      asentric.AlertSink
@@ -31,43 +41,32 @@ type EngineDispatcher struct {
 	abiRegistry    domain.ABIRegistry
 }
 
-// EngineDispatcherConfig contains all dependencies required to construct
+// EngineDispatcherConfig defines all dependencies required to construct
 // an EngineDispatcher.
 //
-// All fields are mandatory and will be validated during initialization.
+// All fields are required and validated during initialization to ensure
+// the dispatcher is always created in a valid state.
 type EngineDispatcherConfig struct {
-	// Engine is responsible for evaluating rules against a Context.
+	// Engine evaluates rules against a Context.
 	Engine *asentric.Engine
 
-	// AlertSink is used to emit alerts produced by the Engine.
+	// AlertSink receives and delivers alerts produced by rule evaluation.
 	AlertSink asentric.AlertSink
 
 	// ContextBuilder converts Events into evaluation-ready Contexts.
 	ContextBuilder ContextBuilder
 
-	// ABIRegistry provides ABI definitions used during event decoding.
+	// ABIRegistry provides ABI definitions used when decoding event data.
 	ABIRegistry domain.ABIRegistry
 }
 
-// NewEngineDispatcher creates a new EngineDispatcher instance.
+// NewEngineDispatcher creates and initializes a new EngineDispatcher.
 //
-// It validates that all required dependencies are provided.
-// Returns a descriptive error if any dependency is missing.
+// All required dependencies are validated before construction.
+// If any dependency is missing, a well-defined dispatcher error is returned.
 func NewEngineDispatcher(config EngineDispatcherConfig) (*EngineDispatcher, error) {
-	if config.Engine == nil {
-		return nil, asentric.ErrDispatcherEngine
-	}
-
-	if config.AlertSink == nil {
-		return nil, asentric.ErrDispatcherAlertSink
-	}
-
-	if config.ContextBuilder == nil {
-		return nil, asentric.ErrDispatcherContextBuilder
-	}
-
-	if config.ABIRegistry == nil {
-		return nil, asentric.ErrDispatcherABIRegistry
+	if err := validateNewEngineDispatcher(config); err != nil {
+		return nil, err
 	}
 
 	return &EngineDispatcher{
@@ -78,16 +77,43 @@ func NewEngineDispatcher(config EngineDispatcherConfig) (*EngineDispatcher, erro
 	}, nil
 }
 
-// Dispatch processes a single Event through the Engine.
+// validateNewEngineDispatcher validates required dependencies for
+// EngineDispatcher construction.
 //
-// Execution flow:
-//  1. Build Context from Event using ContextBuilder
+// This function ensures the dispatcher fails fast during initialization
+// rather than at runtime.
+func validateNewEngineDispatcher(config EngineDispatcherConfig) error {
+	if config.Engine == nil {
+		return asentric.ErrDispatcherEngine
+	}
+
+	if config.AlertSink == nil {
+		return asentric.ErrDispatcherAlertSink
+	}
+
+	if config.ContextBuilder == nil {
+		return asentric.ErrDispatcherContextBuilder
+	}
+
+	if config.ABIRegistry == nil {
+		return asentric.ErrDispatcherABIRegistry
+	}
+
+	return nil
+}
+
+// Dispatch processes a single Event through the Engine lifecycle.
+//
+// Processing flow:
+//  1. Build a Context from the incoming Event
 //  2. Evaluate rules using Engine.Evaluate
-//  3. Emit each generated Alert via AlertSink
+//  3. Emit all generated Alerts via AlertSink
 //
-// Dispatch returns an error if:
-//   - Rule evaluation fails
-//   - Emitting any alert fails
+// Dispatch uses fail-fast semantics:
+//   - If rule evaluation fails, dispatch stops immediately
+//   - If emitting any alert fails, dispatch stops and returns the error
+//
+// A nil error indicates the event was fully processed without failures.
 func (e *EngineDispatcher) Dispatch(event asentric.Event) error {
 	// Step 1: Build evaluation context from event
 	ctx := e.contextBuilder.Build(event)
