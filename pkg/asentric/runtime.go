@@ -47,8 +47,7 @@ import (
 //	runtime.Start(context.Background())
 
 type Runtime struct {
-	config   *RuntimeConfig
-	registry *RegistryConfig
+	config *RuntimeConfig
 	// Runtime does NOT call engine directly.
 	// Engine is owned by Dispatcher and injected into Runtime.
 	engine *Engine
@@ -203,9 +202,7 @@ func (r *Runtime) validateDependencies() error {
 	return nil
 }
 
-func (r *Runtime) ApplyDefaults() {
-	r.config.ApplyDefaults()
-}
+
 
 // Stop gracefully stops the runtime.
 func (r *Runtime) Stop(ctx context.Context) error {

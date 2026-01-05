@@ -17,6 +17,19 @@ var (
 	ErrInvalidEngineConfig    = errors.New("invalid engine configuration")
 	ErrInvalidWebSocketConfig = errors.New("invalid web socket configuration")
 
+	// Config Validation Details
+	ErrSourceTypeRequired = errors.New("source.type is required")
+	ErrSourceURLRequired  = errors.New("source.url is required for websocket type")
+	ErrSinkTypeRequired   = errors.New("sink.type is required")
+	ErrSinkURLRequired    = errors.New("sink.url is required for webhook type")
+	ErrChainIDRequired    = errors.New("chain.id is required")
+	ErrChainNameRequired  = errors.New("chain.name is required")
+	ErrChainRPCWSRequired = errors.New("chain.rpcWs is required for websocket source")
+
+	// Config Loading
+	ErrConfigReadFailed  = errors.New("failed to read config file")
+	ErrConfigParseFailed = errors.New("failed to parse config file")
+
 	// Websocket errors
 	ErrFailedToConnectWebSocket = errors.New("failed to connect to websocket")
 

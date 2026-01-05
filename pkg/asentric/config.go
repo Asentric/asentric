@@ -2,152 +2,148 @@ package asentric
 
 import (
 	"fmt"
-	"strings"
-	"time"
+	"os"
+
+	"gopkg.in/yaml.v3"
 )
 
 // RuntimeConfig holds all configuration for the Asentric runtime.
 // This is loaded from config/asentric.yaml
+//
+// Design: Infrastructure-agnostic. Specific implementations (WebSocket, Redis, Webhook)
+// are injected at runtime via With* methods on Runtime.
 type RuntimeConfig struct {
-	Chain   ChainConfig   `yaml:"chain"`
-	Redis   RedisConfig   `yaml:"redis"`
-	Webhook WebhookConfig `yaml:"webhook"`
-	Engine  EngineConfig  `yaml:"engine"`
-	Debug   bool          `yaml:"debug"`
+	Version string `yaml:"version"` // Config version (e.g., "1.0")
+
+	Chain  ChainConfig  `yaml:"chain"`
+	Source SourceConfig `yaml:"source"`
+	Sink   SinkConfig   `yaml:"sink"`
+	Queue  QueueConfig  `yaml:"queue"`
+	ABI    ABIConfig    `yaml:"abi"`
+
+	Debug bool `yaml:"debug"` // Enable debug logging
+
+	// Runtime fields (set programmatically, not from YAML)
+	Engine *Engine `yaml:"-"`
+	Logger Logger  `yaml:"-"`
+}
+
+// ChainConfig defines the blockchain configuration.
+type ChainConfig struct {
+	ID     int64  `yaml:"id"`     // Chain ID (1 for Ethereum, 5000 for Mantle)
+	Name   string `yaml:"name"`   // Human readable name
+	RPCURL string `yaml:"rpcUrl"` // HTTP RPC endpoint
+	RPCWS  string `yaml:"rpcWs"`  // WebSocket RPC endpoint (for subscriptions)
+}
+
+// SourceConfig defines the event source configuration.
+type SourceConfig struct {
+	Type string `yaml:"type"` // "websocket", "memory"
+	URL  string `yaml:"url"`  // WebSocket URL or empty for memory
+}
+
+// SinkConfig defines the alert sink configuration.
+type SinkConfig struct {
+	Type string `yaml:"type"` // "webhook", "console"
+	URL  string `yaml:"url"`  // Webhook URL or empty for console
+}
+
+// QueueConfig defines the queue configuration.
+type QueueConfig struct {
+	Type string `yaml:"type"` // "redis", "memory"
+	URL  string `yaml:"url"`  // Redis URL or empty for memory
+}
+
+// ABIConfig defines the ABI registry configuration.
+type ABIConfig struct {
+	RegistryPath string `yaml:"registryPath"` // Path to registry.yaml
+}
+
+// LoadConfig loads configuration from a YAML file.
+// Returns error if file not found or invalid YAML.
+func LoadConfig(path string) (*RuntimeConfig, error) {
+	// Check file exists
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrConfigReadFailed, err)
+	}
+
+	// Parse YAML
+	var cfg RuntimeConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrConfigParseFailed, err)
+	}
+
+	// Validate
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+// LoadConfigOrDefault loads config from path, or returns default config if path is empty.
+func LoadConfigOrDefault(path string) (*RuntimeConfig, error) {
+	if path == "" {
+		return DefaultRuntimeConfig(), nil
+	}
+	return LoadConfig(path)
 }
 
 // Validate checks if the configuration is valid.
 func (c *RuntimeConfig) Validate() error {
-
 	if c == nil {
 		return ErrInvalidConfig
 	}
 
-	if err := validateChainConfig(c.Chain); err != nil {
-		return err
+	// Validate source
+	if c.Source.Type == "" {
+		return ErrSourceTypeRequired
 	}
-	if err := validateRedisConfig(c.Redis); err != nil {
-		return err
+	if c.Source.Type == "websocket" && c.Source.URL == "" {
+		return ErrSourceURLRequired
 	}
-	if err := validateWebhookConfig(c.Webhook); err != nil {
-		return err
+
+	// Validate sink
+	if c.Sink.Type == "" {
+		return ErrSinkTypeRequired
 	}
+	if c.Sink.Type == "webhook" && c.Sink.URL == "" {
+		return ErrSinkURLRequired
+	}
+
+	// Validate chain
+	if c.Chain.ID == 0 {
+		return ErrChainIDRequired
+	}
+	if c.Chain.Name == "" {
+		return ErrChainNameRequired
+	}
+
+	// Validate websocket source requires RPCWS
+	if c.Source.Type == "websocket" && c.Chain.RPCWS == "" {
+		return ErrChainRPCWSRequired
+	}
+
 	return nil
 }
 
-// ChainConfig holds chain-specific configuration.
-type ChainConfig struct {
-	// RPCWS is the WebSocket RPC endpoint (required)
-	// Example: "wss://rpc.mantle.xyz/ws"
-	RPCWS string `yaml:"rpc_ws"`
-
-	// Name is the network name for alerts (required)
-	// Example: "Mantle", "Ethereum", "Arbitrum"
-	Name string `yaml:"name"`
-
-	// ChainID is the numeric chain identifier (optional, auto-detect if not provided)
-	ChainID uint64 `yaml:"chain_id"`
-}
-
-// RedisConfig holds Redis connection configuration.
-type RedisConfig struct {
-	// Addr is the Redis server address (required)
-	// Example: "localhost:6379"
-	Addr string `yaml:"addr"`
-
-	// Password is the Redis password (optional)
-	Password string `yaml:"password"`
-
-	// DB is the Redis database number (optional, default 0)
-	DB int `yaml:"db"`
-
-	// PoolSize is the connection pool size (optional, default 10)
-	PoolSize int `yaml:"pool_size"`
-}
-
-// WebhookConfig holds webhook delivery configuration.
-type WebhookConfig struct {
-	// URL is the webhook endpoint (required)
-	// Example: "https://your-webhook.com/alerts"
-	URL string `yaml:"url"`
-
-	// Timeout is the request timeout (optional, default 10s)
-	Timeout time.Duration `yaml:"timeout"`
-
-	// RetryCount is the number of retries on failure (optional, default 3)
-	RetryCount int `yaml:"retry_count"`
-
-	// Headers are additional HTTP headers to send (optional)
-	Headers map[string]string `yaml:"headers"`
-}
-
-// EngineConfig holds engine-specific configuration.
-type EngineConfig struct {
-	// FailFast stops processing on first rule error (default false)
-	FailFast bool `yaml:"fail_fast"`
-}
-
-// RegistryConfig holds target monitoring configuration.
-// This is loaded from config/registry.yaml
-type RegistryConfig struct {
-	Targets []TargetConfig `yaml:"targets"`
-}
-
-// TargetConfig holds configuration for a single monitoring target.
-type TargetConfig struct {
-	// Address is the contract address (required)
-	// Example: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
-	Address string `yaml:"address"`
-
-	// Name is the contract name for alerts (required)
-	// Example: "Uniswap V3 Router"
-	Name string `yaml:"name"`
-
-	// ABIPath is the path to the ABI JSON file (required)
-	// Example: "abi/uniswap_v3.json"
-	ABIPath string `yaml:"abi_path"`
-}
-
-func (r *RuntimeConfig) ApplyDefaults() {
-	if r.Redis.PoolSize == 0 {
-		r.Redis.PoolSize = 10
+// DefaultRuntimeConfig returns a default configuration for development.
+func DefaultRuntimeConfig() *RuntimeConfig {
+	return &RuntimeConfig{
+		Version: "1.0",
+		Chain: ChainConfig{
+			ID:   1,
+			Name: "Ethereum",
+		},
+		Source: SourceConfig{
+			Type: "memory",
+		},
+		Sink: SinkConfig{
+			Type: "console",
+		},
+		Queue: QueueConfig{
+			Type: "memory",
+		},
 	}
-	if r.Webhook.Timeout == 0 {
-		r.Webhook.Timeout = 10 * time.Second
-	}
-	if r.Webhook.RetryCount == 0 {
-		r.Webhook.RetryCount = 3
-	}
-}
-
-// validateChainConfig validates chain configuration.
-func validateChainConfig(chain ChainConfig) error {
-	if chain.RPCWS == "" {
-		return fmt.Errorf("%w: chain.rpc_ws is required", ErrInvalidChainConfig)
-	}
-
-	if !strings.HasPrefix(chain.RPCWS, "ws://") && !strings.HasPrefix(chain.RPCWS, "wss://") {
-		return fmt.Errorf("%w: chain.rpc_ws must be ws:// or wss://", ErrInvalidChainConfig)
-	}
-
-	if chain.Name == "" {
-		return fmt.Errorf("%w: chain.name is required", ErrInvalidChainConfig)
-	}
-	return nil
-}
-
-// validateRedisConfig validates Redis configuration.
-func validateRedisConfig(redis RedisConfig) error {
-	if redis.Addr == "" {
-		return fmt.Errorf("%w: redis.addr is required", ErrInvalidRedisConfig)
-	}
-	return nil
-}
-
-// validateWebhookConfig validates webhook configuration.
-func validateWebhookConfig(webhook WebhookConfig) error {
-	if webhook.URL == "" {
-		return fmt.Errorf("%w: webhook.url is required", ErrInvalidWebhookConfig)
-	}
-	return nil
 }
