@@ -19,6 +19,10 @@ func (r *AlwaysAlertRule) Name() string {
 	return r.ruleID
 }
 
+func (r *AlwaysAlertRule) Severity() asentric.Severity {
+	return asentric.SeverityInfo
+}
+
 func (r *AlwaysAlertRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
 	alert := &asentric.Alert{
 		Rule:        r.ruleID,
@@ -44,6 +48,10 @@ func (r *AlwaysAlertRuleCritical) Name() string {
 	return r.ruleID
 }
 
+func (r *AlwaysAlertRuleCritical) Severity() asentric.Severity {
+	return asentric.SeverityCritical
+}
+
 func (r *AlwaysAlertRuleCritical) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
 	alert := &asentric.Alert{
 		Rule:        r.ruleID,
@@ -67,6 +75,10 @@ func NewAlwaysAlertRuleHigh(ruleID string) *AlwaysAlertRuleHigh {
 
 func (r *AlwaysAlertRuleHigh) Name() string {
 	return r.ruleID
+}
+
+func (r *AlwaysAlertRuleHigh) Severity() asentric.Severity {
+	return asentric.SeverityHigh
 }
 
 func (r *AlwaysAlertRuleHigh) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
@@ -98,6 +110,10 @@ func (r *AlwaysAlertRuleMedium) Name() string {
 	return r.ruleID
 }
 
+func (r *AlwaysAlertRuleMedium) Severity() asentric.Severity {
+	return asentric.SeverityMedium
+}
+
 func (r *AlwaysAlertRuleMedium) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
 	alert := &asentric.Alert{
 		Rule:        r.ruleID,
@@ -125,6 +141,10 @@ func NewAlwaysAlertRuleLow(ruleID string) *AlwaysAlertRuleLow {
 
 func (r *AlwaysAlertRuleLow) Name() string {
 	return r.ruleID
+}
+
+func (r *AlwaysAlertRuleLow) Severity() asentric.Severity {
+	return asentric.SeverityLow
 }
 
 func (r *AlwaysAlertRuleLow) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
@@ -156,6 +176,10 @@ func (r *NeverAlertRule) Name() string {
 	return r.ruleID
 }
 
+func (r *NeverAlertRule) Severity() asentric.Severity {
+	return asentric.SeverityInfo
+}
+
 func (r *NeverAlertRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
 	return nil, nil
 }
@@ -176,6 +200,10 @@ func NewConditionalAlertRule(ruleID string) *ConditionalAlertRule {
 
 func (r *ConditionalAlertRule) Name() string {
 	return r.ruleID
+}
+
+func (r *ConditionalAlertRule) Severity() asentric.Severity {
+	return asentric.SeverityMedium
 }
 
 func (r *ConditionalAlertRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {

@@ -29,6 +29,10 @@ func (r *PanicRule) Name() string {
 	return r.ruleID
 }
 
+func (r *PanicRule) Severity() asentric.Severity {
+	return asentric.SeverityCritical
+}
+
 func (r *PanicRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
 	// Intentionally panic to test recovery
 	panic(r.panicMsg)
@@ -55,6 +59,10 @@ func NewErrorRuleWithMessage(ruleID, errorMsg string) *ErrorRule {
 
 func (r *ErrorRule) Name() string {
 	return r.ruleID
+}
+
+func (r *ErrorRule) Severity() asentric.Severity {
+	return asentric.SeverityHigh
 }
 
 func (r *ErrorRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
@@ -89,6 +97,10 @@ func NewErrorRuleWithAlertAndMessage(ruleID, errorMsg string) *ErrorRuleWithAler
 
 func (r *ErrorRuleWithAlert) Name() string {
 	return r.ruleID
+}
+
+func (r *ErrorRuleWithAlert) Severity() asentric.Severity {
+	return asentric.SeverityHigh
 }
 
 func (r *ErrorRuleWithAlert) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {

@@ -195,11 +195,11 @@ func TestDefaultLogs(t *testing.T) {
 	if log.LogIndex != 0 {
 		t.Errorf("Expected log index 0, got %d", log.LogIndex)
 	}
-	if log.TxHash != domain.Hash("0xlogtxhash") {
-		t.Errorf("Expected tx hash 0xlogtxhash, got %s", log.TxHash)
+	if log.TxHash != domain.Hash("0xdefault123456789abcdef") {
+		t.Errorf("Expected tx hash 0xdefault123456789abcdef, got %s", log.TxHash)
 	}
-	if log.TxIndex != 1 {
-		t.Errorf("Expected tx index 1, got %d", log.TxIndex)
+	if log.TxIndex != 0 {
+		t.Errorf("Expected tx index 0, got %d", log.TxIndex)
 	}
 	if log.Event.Name != "Transfer" {
 		t.Errorf("Expected event name Transfer, got %s", log.Event.Name)

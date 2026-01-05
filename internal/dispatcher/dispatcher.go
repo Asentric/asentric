@@ -1,6 +1,8 @@
 package dispatcher
 
 import (
+	"context"
+
 	"github.com/asentric/asentric/pkg/asentric"
 	"github.com/asentric/asentric/pkg/domain"
 )
@@ -114,22 +116,37 @@ func validateNewEngineDispatcher(config EngineDispatcherConfig) error {
 //   - If emitting any alert fails, dispatch stops and returns the error
 //
 // A nil error indicates the event was fully processed without failures.
-func (e *EngineDispatcher) Dispatch(event asentric.Event) error {
+func (e *EngineDispatcher) Dispatch(ctx context.Context, event asentric.Event) error {
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Step 1: Build evaluation context from event
-	ctx := e.contextBuilder.Build(event)
+	evalCtx := e.contextBuilder.Build(event)
 
 	// Step 2: Evaluate rules against the context
-	alerts, err := e.engine.Evaluate(ctx)
+	alerts, err := e.engine.Evaluate(evalCtx)
 	if err != nil {
 		return err
 	}
 
 	// Step 3: Emit generated alerts
 	for _, alert := range alerts {
-		if err := e.alertSink.Emit(ctx, alert); err != nil {
+		// Check for cancellation before each emit
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err := e.alertSink.Emit(ctx, evalCtx, alert); err != nil {
 			return err
 		}
 	}
 
 	return nil
 }
+
