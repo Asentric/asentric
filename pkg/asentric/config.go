@@ -1,24 +1,39 @@
 package asentric
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Config holds basic configuration for the Engine.
-// Used for simple FailFast behavior.
-type Config struct {
-	FailFast bool
+// RuntimeConfig holds all configuration for the Asentric runtime.
+// This is loaded from config/asentric.yaml
+//
+// Design: Infrastructure-agnostic. Specific implementations (WebSocket, Redis, Webhook)
+// are injected at runtime via With* methods on Runtime.
+type RuntimeConfig struct {
+	Version string `yaml:"version"` // Config version (e.g., "1.0")
+
+	Chain  ChainConfig  `yaml:"chain"`
+	Source SourceConfig `yaml:"source"`
+	Sink   SinkConfig   `yaml:"sink"`
+	Queue  QueueConfig  `yaml:"queue"`
+	ABI    ABIConfig    `yaml:"abi"`
+
+	Debug bool `yaml:"debug"` // Enable debug logging
+
+	// Runtime fields (set programmatically, not from YAML)
+	Engine *Engine `yaml:"-"`
+	Logger Logger  `yaml:"-"`
 }
 
-// DefaultConfig returns a default configuration for the Engine.
-func DefaultConfig() *Config {
-	return &Config{
-		FailFast: false,
-	}
+// ChainConfig defines the blockchain configuration.
+type ChainConfig struct {
+	ID     int64  `yaml:"id"`     // Chain ID (1 for Ethereum, 5000 for Mantle)
+	Name   string `yaml:"name"`   // Human readable name
+	RPCURL string `yaml:"rpcUrl"` // HTTP RPC endpoint
+	RPCWS  string `yaml:"rpcWs"`  // WebSocket RPC endpoint (for subscriptions)
 }
 
 // SourceConfig defines the event source configuration.
@@ -39,31 +54,9 @@ type QueueConfig struct {
 	URL  string `yaml:"url"`  // Redis URL or empty for memory
 }
 
-// ChainConfig defines the blockchain configuration.
-type ChainConfig struct {
-	ID     int64  `yaml:"id"`     // Chain ID (1 for Ethereum, 5000 for Mantle)
-	Name   string `yaml:"name"`   // Human readable name
-	RPCURL string `yaml:"rpcUrl"` // RPC endpoint
-}
-
 // ABIConfig defines the ABI registry configuration.
 type ABIConfig struct {
 	RegistryPath string `yaml:"registryPath"` // Path to registry.yaml
-}
-
-// RuntimeConfig holds all configuration for the Asentric runtime.
-type RuntimeConfig struct {
-	Version string `yaml:"version"` // Config version (e.g., "1.0")
-
-	Chain  ChainConfig  `yaml:"chain"`
-	Source SourceConfig `yaml:"source"`
-	Sink   SinkConfig   `yaml:"sink"`
-	Queue  QueueConfig  `yaml:"queue"`
-	ABI    ABIConfig    `yaml:"abi"`
-
-	// Runtime fields (set programmatically, not from YAML)
-	Engine *Engine `yaml:"-"`
-	Logger Logger  `yaml:"-"`
 }
 
 // LoadConfig loads configuration from a YAML file.
@@ -72,13 +65,13 @@ func LoadConfig(path string) (*RuntimeConfig, error) {
 	// Check file exists
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("asentric: failed to read config file: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrConfigReadFailed, err)
 	}
 
 	// Parse YAML
 	var cfg RuntimeConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("asentric: failed to parse config file: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrConfigParseFailed, err)
 	}
 
 	// Validate
@@ -89,32 +82,6 @@ func LoadConfig(path string) (*RuntimeConfig, error) {
 	return &cfg, nil
 }
 
-// Validate checks if the configuration is valid.
-func (c *RuntimeConfig) Validate() error {
-	// Validate source
-	if c.Source.Type == "" {
-		return errors.New("asentric: source.type is required")
-	}
-	if c.Source.Type == "websocket" && c.Source.URL == "" {
-		return errors.New("asentric: source.url is required for websocket type")
-	}
-
-	// Validate sink
-	if c.Sink.Type == "" {
-		return errors.New("asentric: sink.type is required")
-	}
-	if c.Sink.Type == "webhook" && c.Sink.URL == "" {
-		return errors.New("asentric: sink.url is required for webhook type")
-	}
-
-	// Validate chain
-	if c.Chain.ID == 0 {
-		return errors.New("asentric: chain.id is required")
-	}
-
-	return nil
-}
-
 // LoadConfigOrDefault loads config from path, or returns default config if path is empty.
 func LoadConfigOrDefault(path string) (*RuntimeConfig, error) {
 	if path == "" {
@@ -123,13 +90,51 @@ func LoadConfigOrDefault(path string) (*RuntimeConfig, error) {
 	return LoadConfig(path)
 }
 
+// Validate checks if the configuration is valid.
+func (c *RuntimeConfig) Validate() error {
+	if c == nil {
+		return ErrInvalidConfig
+	}
+
+	// Validate source
+	if c.Source.Type == "" {
+		return ErrSourceTypeRequired
+	}
+	if c.Source.Type == "websocket" && c.Source.URL == "" {
+		return ErrSourceURLRequired
+	}
+
+	// Validate sink
+	if c.Sink.Type == "" {
+		return ErrSinkTypeRequired
+	}
+	if c.Sink.Type == "webhook" && c.Sink.URL == "" {
+		return ErrSinkURLRequired
+	}
+
+	// Validate chain
+	if c.Chain.ID == 0 {
+		return ErrChainIDRequired
+	}
+	if c.Chain.Name == "" {
+		return ErrChainNameRequired
+	}
+
+	// Validate websocket source requires RPCWS
+	if c.Source.Type == "websocket" && c.Chain.RPCWS == "" {
+		return ErrChainRPCWSRequired
+	}
+
+	return nil
+}
+
 // DefaultRuntimeConfig returns a default configuration for development.
 func DefaultRuntimeConfig() *RuntimeConfig {
 	return &RuntimeConfig{
 		Version: "1.0",
 		Chain: ChainConfig{
 			ID:   1,
-			Name: "Mantle",
+			Name: "Ethereum",
 		},
 		Source: SourceConfig{
 			Type: "memory",

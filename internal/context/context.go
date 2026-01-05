@@ -27,6 +27,12 @@ func NewEventContext(event asentric.Event) *EventContext {
 	}
 }
 
+// WithChainID sets the chain ID.
+func (c *EventContext) WithChainID(chainID domain.ChainID) *EventContext {
+	c.chainID = chainID
+	return c
+}
+
 // WithTransaction sets the transaction data.
 func (c *EventContext) WithTransaction(tx domain.Transaction) *EventContext {
 	c.tx = tx
