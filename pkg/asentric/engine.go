@@ -28,6 +28,7 @@ func (e *Engine) RegisterRule(rule Rule) error {
 	if rule == nil {
 		return ErrInvalidRule
 	}
+
 	e.rules = append(e.rules, rule)
 	return nil
 }
