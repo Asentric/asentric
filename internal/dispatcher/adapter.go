@@ -14,9 +14,8 @@ func NewContextBuilderAdapter(builder *DefaultContextBuilder) *ContextBuilderAda
 }
 
 // Build implements the ContextBuilder interface.
-func (a *ContextBuilderAdapter) Build(event asentric.Event) asentric.Context {
-	ctx, _ := a.builder.Build(event)
-	return ctx
+func (a *ContextBuilderAdapter) Build(event asentric.Event) (asentric.Context, error) {
+	return a.builder.Build(event)
 }
 
 // Ensure ContextBuilderAdapter implements ContextBuilder
