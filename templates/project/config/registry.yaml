@@ -1,0 +1,16 @@
+# Contract Registry
+# Add contracts to monitor here
+# 
+# Format:
+#   targets:
+#     - address: "0x..."
+#       name: "Contract Name"
+#       abi_path: "abi/contract.json"
+#
+# Example:
+#   targets:
+#     - address: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+#       name: "USDT"
+#       abi_path: "abi/erc20.json"
+
+targets: []

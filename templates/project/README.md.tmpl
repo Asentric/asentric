@@ -1,0 +1,83 @@
+# {{.ProjectName}}
+
+A blockchain security watcher built with [Asentric SDK](https://github.com/asentric/asentric).
+
+## Quick Start
+
+```bash
+# Install dependencies
+go mod tidy
+
+# Edit configuration (optional)
+# config/asentric.yaml
+
+# Run watcher
+go run cmd/watcher/main.go
+```
+
+## Project Structure
+
+```
+{{.ProjectName}}/
+├── config/
+│   ├── asentric.yaml    # Runtime configuration
+│   └── registry.yaml    # Target contracts to monitor
+├── rules/
+│   └── example_rule.go  # Custom detection rules
+├── abi/                  # Contract ABI files
+├── cmd/
+│   └── watcher/
+│       └── main.go      # Entry point
+├── go.mod
+└── README.md
+```
+
+## Configuration
+
+### config/asentric.yaml
+
+- `chain` - Blockchain connection settings
+- `source` - Event source configuration (websocket)
+- `sink` - Alert destination (console, webhook)
+- `debug` - Enable debug logging
+
+### config/registry.yaml
+
+Add contracts to monitor:
+
+```yaml
+targets:
+  - address: "0x..."
+    name: "My Contract"
+    abi_path: "abi/mycontract.json"
+```
+
+## Writing Rules
+
+Rules implement the `asentric.Rule` interface:
+
+```go
+type MyRule struct{}
+
+func (r *MyRule) Name() string { return "my-rule" }
+func (r *MyRule) Severity() asentric.Severity { return asentric.SeverityMedium }
+func (r *MyRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
+    // Your detection logic here
+    return nil, nil
+}
+```
+
+Register rules in `cmd/watcher/main.go`:
+
+```go
+engine.RegisterRule(&rules.MyRule{})
+```
+
+## Documentation
+
+- [Asentric SDK](https://github.com/asentric/asentric)
+- [API Reference](https://github.com/asentric/asentric/docs/sdk-api.md)
+
+## License
+
+MIT

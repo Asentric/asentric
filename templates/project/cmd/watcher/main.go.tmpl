@@ -1,0 +1,111 @@
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/asentric/asentric/internal/dispatcher"
+	"github.com/asentric/asentric/internal/sink"
+	"github.com/asentric/asentric/internal/source"
+	"github.com/asentric/asentric/pkg/asentric"
+
+	"{{.ModulePath}}/rules"
+)
+
+func main() {
+	log.Println("===========================================")
+	log.Println("  {{.ProjectName}} - Asentric Watcher")
+	log.Println("===========================================")
+
+	// Load configuration
+	cfg, err := asentric.LoadConfig("config/asentric.yaml")
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Create engine and register rules
+	engine := asentric.NewEngine()
+
+	// Register your rules here
+	if err := engine.RegisterRule(rules.NewLargeTransferRule()); err != nil {
+		log.Fatalf("Failed to register rule: %v", err)
+	}
+
+	log.Println("✓ Rules registered")
+
+	// Create runtime
+	runtime, err := asentric.NewRuntime(cfg, engine)
+	if err != nil {
+		log.Fatalf("Failed to create runtime: %v", err)
+	}
+
+	// Build event source based on config
+	var eventSource asentric.EventSource
+	switch cfg.Source.Type {
+	case "websocket":
+		eventSource, err = source.NewWebSocketSource(source.WebSocketConfig{
+			URL:     cfg.Chain.RPCWS,
+			ChainID: cfg.Chain.ID,
+		})
+		if err != nil {
+			log.Fatalf("Failed to create WebSocket source: %v", err)
+		}
+	default:
+		log.Fatalf("Unknown source type: %s", cfg.Source.Type)
+	}
+	log.Println("✓ Event source ready")
+
+	// Build alert sink based on config
+	var alertSink asentric.AlertSink
+	switch cfg.Sink.Type {
+	case "console":
+		alertSink = sink.NewConsoleSink()
+	case "webhook":
+		alertSink = sink.NewWebhookSink(sink.WebhookConfig{
+			URL: cfg.Sink.URL,
+		})
+	default:
+		log.Fatalf("Unknown sink type: %s", cfg.Sink.Type)
+	}
+	log.Println("✓ Alert sink ready")
+
+	// Create dispatcher
+	disp := dispatcher.NewDispatcher(engine, alertSink)
+
+	// Wire up runtime
+	runtime.
+		WithEventSource(eventSource).
+		WithAlertSink(alertSink).
+		WithDispatcher(disp)
+
+	// Setup graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		log.Println("\nShutdown signal received...")
+		cancel()
+	}()
+
+	// Start runtime
+	log.Println("-------------------------------------------")
+	log.Printf("Chain:  %s (ID: %d)", cfg.Chain.Name, cfg.Chain.ID)
+	log.Printf("Source: %s", cfg.Source.Type)
+	log.Printf("Sink:   %s", cfg.Sink.Type)
+	log.Println("-------------------------------------------")
+	log.Println("Listening for events... (Press Ctrl+C to stop)")
+	log.Println("")
+
+	if err := runtime.Start(ctx); err != nil && err != context.Canceled {
+		log.Fatalf("Runtime error: %v", err)
+	}
+
+	log.Println("Watcher stopped.")
+}
