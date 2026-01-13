@@ -22,7 +22,8 @@ type ContextBuilder interface {
 	//
 	// The returned Context is passed directly to Engine.Evaluate and must
 	// contain all data required by registered rules.
-	Build(event asentric.Event) asentric.Context
+	// Returns an error if the context cannot be built from the event.
+	Build(event asentric.Event) (asentric.Context, error)
 }
 
 // EngineDispatcher routes incoming Events to the rule Engine.
@@ -125,7 +126,10 @@ func (e *EngineDispatcher) Dispatch(ctx context.Context, event asentric.Event) e
 	}
 
 	// Step 1: Build evaluation context from event
-	evalCtx := e.contextBuilder.Build(event)
+	evalCtx, err := e.contextBuilder.Build(event)
+	if err != nil {
+		return err
+	}
 
 	// Step 2: Evaluate rules against the context
 	alerts, err := e.engine.Evaluate(evalCtx)
@@ -149,4 +153,3 @@ func (e *EngineDispatcher) Dispatch(ctx context.Context, event asentric.Event) e
 
 	return nil
 }
-
