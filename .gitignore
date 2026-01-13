@@ -127,3 +127,7 @@ docs/.doctrees/
 # Project-specific
 # Add any project-specific ignores here
 
+# Built binaries (root level)
+/asentric
+/runtime-reference
+/simple-watcher
