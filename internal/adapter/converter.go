@@ -23,26 +23,30 @@ func ToEvent(rawLog chain.RawLog, chainID uint64) asentric.Event {
 
 // toLogPayload creates the payload map from a RawLog.
 // The payload structure matches what ContextBuilder expects.
+// IMPORTANT: logs must be []interface{} for type assertion in ContextBuilder to work.
 func toLogPayload(rawLog chain.RawLog) map[string]interface{} {
 	topics := make([]string, len(rawLog.Topics))
 	for i, t := range rawLog.Topics {
 		topics[i] = t.Hex()
 	}
 
+	// Use []interface{} instead of []map[string]interface{}
+	// Go doesn't support covariance, so []map[string]interface{} cannot be
+	// type-asserted to []interface{} in ContextBuilder.extractLogs()
+	logEntry := map[string]interface{}{
+		"address":          rawLog.Address.Hex(),
+		"topics":           topics,
+		"data":             common.Bytes2Hex(rawLog.Data),
+		"blockNumber":      rawLog.BlockNumber,
+		"transactionHash":  rawLog.TxHash.Hex(),
+		"transactionIndex": rawLog.TxIndex,
+		"blockHash":        rawLog.BlockHash.Hex(),
+		"logIndex":         rawLog.LogIndex,
+		"removed":          rawLog.Removed,
+	}
+
 	return map[string]interface{}{
-		"logs": []map[string]interface{}{
-			{
-				"address":          rawLog.Address.Hex(),
-				"topics":           topics,
-				"data":             common.Bytes2Hex(rawLog.Data),
-				"blockNumber":      rawLog.BlockNumber,
-				"transactionHash":  rawLog.TxHash.Hex(),
-				"transactionIndex": rawLog.TxIndex,
-				"blockHash":        rawLog.BlockHash.Hex(),
-				"logIndex":         rawLog.LogIndex,
-				"removed":          rawLog.Removed,
-			},
-		},
+		"logs": []interface{}{logEntry},
 	}
 }
 

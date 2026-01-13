@@ -45,12 +45,19 @@ func TestToEvent(t *testing.T) {
 		t.Fatal("Payload should be a map")
 	}
 
-	logs, ok := payload["logs"].([]map[string]interface{})
+	// logs is []interface{} to allow type assertion in ContextBuilder
+	logs, ok := payload["logs"].([]interface{})
 	if !ok || len(logs) == 0 {
-		t.Fatal("Payload should have logs array")
+		t.Fatal("Payload should have logs array as []interface{}")
 	}
 
-	if logs[0]["address"] != rawLog.Address.Hex() {
+	// Each log entry is map[string]interface{}
+	logEntry, ok := logs[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("Log entry should be map[string]interface{}")
+	}
+
+	if logEntry["address"] != rawLog.Address.Hex() {
 		t.Errorf("Log address mismatch")
 	}
 }
