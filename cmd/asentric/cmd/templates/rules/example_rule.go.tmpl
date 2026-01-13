@@ -1,0 +1,99 @@
+package rules
+
+import (
+	"fmt"
+	"math/big"
+	"strings"
+
+	"github.com/asentric/asentric/pkg/asentric"
+	"github.com/asentric/asentric/pkg/utils"
+)
+
+// LargeTransferRule detects ERC20 and native token transfers above a threshold.
+// This is an example rule - modify or replace with your own detection logic.
+type LargeTransferRule struct {
+	Threshold *big.Int
+}
+
+// NewLargeTransferRule creates a new LargeTransferRule.
+// Default threshold: 1000 tokens (assuming 18 decimals).
+func NewLargeTransferRule() *LargeTransferRule {
+	threshold := new(big.Int)
+	threshold.SetString("1000000000000000000000", 10) // 1000 * 10^18
+	return &LargeTransferRule{
+		Threshold: threshold,
+	}
+}
+
+// Name returns the unique identifier for this rule.
+func (r *LargeTransferRule) Name() string {
+	return "large-transfer"
+}
+
+// Severity returns the alert severity level.
+func (r *LargeTransferRule) Severity() asentric.Severity {
+	return asentric.SeverityHigh
+}
+
+// Evaluate runs the detection logic against the context.
+// Returns an Alert if the condition is met, nil otherwise.
+func (r *LargeTransferRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
+	// Check native token transfer (tx.value)
+	tx := ctx.Tx()
+	if tx.RawValue.Wei != "" {
+		value := new(big.Int)
+		value.SetString(tx.RawValue.Wei, 10)
+
+		if value.Cmp(r.Threshold) > 0 {
+			return asentric.NewAlert(
+				r.Name(),
+				"Large Native Transfer Detected",
+				r.Severity(),
+			).
+				WithDescription("Transfer value exceeds threshold").
+				WithMetadata("value_wei", tx.RawValue.Wei).
+				WithMetadata("from", tx.From.Hex()).
+				WithMetadata("to", tx.To.Hex()), nil
+		}
+	}
+
+	// Check ERC20 Transfer events in logs
+	for _, log := range ctx.Logs() {
+		if log.Event.Name == "Transfer" {
+			// Use Fields (not Args) - this is the correct API
+			value := utils.GetFieldBigInt(log.Event.Fields, "value")
+			if value == nil || value.Sign() == 0 {
+				continue
+			}
+
+			if value.Cmp(r.Threshold) > 0 {
+				from := utils.GetFieldString(log.Event.Fields, "from")
+				to := utils.GetFieldString(log.Event.Fields, "to")
+				
+				// Check if this is a mint (from zero address)
+				isMint := utils.IsZeroAddress(from)
+				
+				title := "Large ERC20 Transfer Detected"
+				if isMint {
+					title = "🎉 Large Token MINT Detected"
+				}
+
+				return asentric.NewAlert(
+					r.Name(),
+					title,
+					r.Severity(),
+				).
+					WithDescription(fmt.Sprintf("From %s to %s", 
+						utils.TruncateAddress(from),
+						utils.TruncateAddress(to))).
+					WithMetadata("value", value.String()).
+					WithMetadata("from", from).
+					WithMetadata("to", to).
+					WithMetadata("isMint", isMint).
+					WithMetadata("contract", strings.ToLower(log.Address.Hex())), nil
+			}
+		}
+	}
+
+	return nil, nil
+}

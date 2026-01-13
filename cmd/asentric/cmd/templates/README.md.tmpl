@@ -1,0 +1,146 @@
+# {{.ProjectName}}
+
+A blockchain security watcher built with [Asentric SDK](https://github.com/asentric/asentric).
+
+## Quick Start
+
+```bash
+# Install dependencies
+go mod tidy
+
+# Edit configuration
+# Update config/asentric.yaml with your RPC endpoint
+
+# Run watcher
+go run cmd/watcher/main.go
+```
+
+## Project Structure
+
+```
+{{.ProjectName}}/
+├── config/
+│   ├── asentric.yaml    # Runtime configuration
+│   └── registry.yaml    # Target contracts to monitor
+├── rules/
+│   └── example_rule.go  # Custom detection rules
+├── abi/                  # Contract ABI files
+├── cmd/
+│   └── watcher/
+│       └── main.go      # Entry point
+├── go.mod
+└── README.md
+```
+
+## Configuration
+
+### config/asentric.yaml
+
+- `chain` - Blockchain connection settings (chain ID, RPC endpoints)
+- `source` - Event source (websocket recommended)
+- `sink` - Alert destination (console for dev, webhook for production)
+- `debug` - Enable debug logging
+
+### config/registry.yaml
+
+Add contracts to monitor:
+
+```yaml
+targets:
+  - address: "0x..."
+    name: "My Contract"
+    abi_path: "abi/mycontract.json"
+```
+
+## Writing Custom Rules
+
+Rules implement the `asentric.Rule` interface:
+
+```go
+package rules
+
+import (
+    "github.com/asentric/asentric/pkg/asentric"
+    "github.com/asentric/asentric/pkg/utils"
+)
+
+type MyRule struct{}
+
+func (r *MyRule) Name() string { 
+    return "my-rule" 
+}
+
+func (r *MyRule) Severity() asentric.Severity { 
+    return asentric.SeverityMedium 
+}
+
+func (r *MyRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
+    for _, log := range ctx.Logs() {
+        if log.Event.Name == "Transfer" {
+            from := utils.GetFieldString(log.Event.Fields, "from")
+            if utils.IsZeroAddress(from) {
+                // This is a mint!
+                return asentric.NewAlert(r.Name(), "Mint Detected!", r.Severity()), nil
+            }
+        }
+    }
+    return nil, nil
+}
+```
+
+Register rules in `cmd/watcher/main.go`:
+
+```go
+engine.RegisterRule(&rules.MyRule{})
+```
+
+## Using Built-in Rules
+
+The SDK provides reusable rules:
+
+```go
+import "github.com/asentric/asentric/pkg/rules"
+
+// ERC20 Transfer detection (with mint/burn)
+engine.RegisterRule(rules.NewERC20TransferRule(rules.ERC20TransferConfig{
+    ContractAddress: "0x...",
+    TokenSymbol:     "USDC",
+    Decimals:        6,
+}))
+
+// Large transfer detection
+engine.RegisterRule(rules.NewLargeTransferRule())
+
+// Whale alert
+engine.RegisterRule(rules.NewWhaleAlertRule())
+```
+
+## Utility Functions
+
+```go
+import "github.com/asentric/asentric/pkg/utils"
+
+// Format token amounts
+utils.FormatTokenAmount(wei, 6)      // "1000000" -> "1"
+
+// Check for mint/burn
+utils.IsZeroAddress(from)            // true = mint
+
+// Truncate addresses for display
+utils.TruncateAddress(addr)          // "0x1234...5678"
+
+// Extract from event fields
+utils.GetFieldString(fields, "from")
+utils.GetFieldBigInt(fields, "value")
+```
+
+## Documentation
+
+- [Asentric SDK](https://github.com/asentric/asentric)
+- [Quick Start Guide](https://github.com/asentric/asentric/docs/QUICK-START.md)
+- [Full Documentation](https://github.com/asentric/asentric/docs/USAGE.md)
+- [API Reference](https://github.com/asentric/asentric/docs/API-CHEATSHEET.md)
+
+## License
+
+MIT

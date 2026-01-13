@@ -1,0 +1,75 @@
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/asentric/asentric/pkg/asentric"
+	"github.com/asentric/asentric/pkg/runtime"
+
+	"{{.ModulePath}}/rules"
+)
+
+func main() {
+	log.Println("===========================================")
+	log.Println("  {{.ProjectName}} - Asentric Watcher")
+	log.Println("===========================================")
+
+	// Load configuration
+	cfg, err := asentric.LoadConfig("config/asentric.yaml")
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Create engine and register rules
+	engine := asentric.NewEngine()
+
+	// Register your rules here
+	if err := engine.RegisterRule(rules.NewLargeTransferRule()); err != nil {
+		log.Fatalf("Failed to register rule: %v", err)
+	}
+
+	log.Println("✓ Rules registered")
+
+	// Setup graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		log.Println("\nShutdown signal received...")
+		cancel()
+	}()
+
+	// Build runtime using the builder API
+	log.Printf("Connecting to %s...", cfg.Chain.Name)
+	rt, err := runtime.NewBuilder(cfg, engine).
+		WithWebSocketSource(ctx).
+		WithSinkFromConfig().
+		Build()
+	if err != nil {
+		log.Fatalf("Failed to build runtime: %v", err)
+	}
+	log.Println("✓ Runtime ready")
+
+	// Start runtime
+	log.Println("-------------------------------------------")
+	log.Printf("Chain:  %s (ID: %d)", cfg.Chain.Name, cfg.Chain.ID)
+	log.Printf("Source: %s", cfg.Source.Type)
+	log.Printf("Sink:   %s", cfg.Sink.Type)
+	log.Println("-------------------------------------------")
+	log.Println("Listening for events... (Press Ctrl+C to stop)")
+	log.Println("")
+
+	if err := rt.Start(ctx); err != nil && err != context.Canceled {
+		log.Fatalf("Runtime error: %v", err)
+	}
+
+	log.Println("Watcher stopped.")
+}
