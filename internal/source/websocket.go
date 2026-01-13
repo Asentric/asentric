@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/asentric/asentric/internal/adapter"
 	"github.com/asentric/asentric/internal/chain"
@@ -29,6 +30,9 @@ type WebSocketSource struct {
 	mu      sync.Mutex
 	running bool
 	cancel  context.CancelFunc
+
+	// Use newHeads mode for providers that don't support log subscription
+	useNewHeads bool
 }
 
 // WebSocketSourceConfig holds configuration for WebSocketSource.
@@ -42,6 +46,10 @@ type WebSocketSourceConfig struct {
 
 	// BufferSize is the event channel buffer size (default: 100)
 	BufferSize int
+
+	// UseNewHeads uses SubscribeNewHead instead of SubscribeFilterLogs
+	// This is more compatible with providers like Alchemy
+	UseNewHeads bool
 }
 
 // NewWebSocketSource creates a new WebSocketSource.
@@ -61,10 +69,11 @@ func NewWebSocketSource(cfg WebSocketSourceConfig) (*WebSocketSource, error) {
 	}
 
 	return &WebSocketSource{
-		client:  cfg.Client,
-		filter:  filter,
-		chainID: cfg.Client.ChainIDUint64(),
-		events:  make(chan asentric.Event, bufferSize),
+		client:      cfg.Client,
+		filter:      filter,
+		chainID:     cfg.Client.ChainIDUint64(),
+		events:      make(chan asentric.Event, bufferSize),
+		useNewHeads: cfg.UseNewHeads,
 	}, nil
 }
 
@@ -82,6 +91,11 @@ func (s *WebSocketSource) Start(parentCtx context.Context) (<-chan asentric.Even
 	ctx, cancel := context.WithCancel(parentCtx)
 	s.cancel = cancel
 
+	if s.useNewHeads {
+		// Use newHeads subscription (more compatible)
+		return s.startNewHeads(ctx, cancel)
+	}
+
 	// Subscribe to logs via chain client
 	rawLogs, sub, err := s.client.SubscribeLogs(ctx, s.filter)
 	if err != nil {
@@ -97,6 +111,78 @@ func (s *WebSocketSource) Start(parentCtx context.Context) (<-chan asentric.Even
 	go s.processLogs(ctx)
 
 	return s.events, nil
+}
+
+// startNewHeads starts subscription using newHeads mode
+func (s *WebSocketSource) startNewHeads(ctx context.Context, cancel context.CancelFunc) (<-chan asentric.Event, error) {
+	headers := make(chan *types.Header)
+	sub, err := s.client.SubscribeNewHead(ctx, headers)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("source: subscribe newHeads failed: %w", err)
+	}
+
+	s.sub = sub
+	s.running = true
+
+	// Start goroutine to process incoming block headers
+	go s.processHeaders(ctx, headers)
+
+	return s.events, nil
+}
+
+// processHeaders converts block headers to events
+func (s *WebSocketSource) processHeaders(ctx context.Context, headers <-chan *types.Header) {
+	defer func() {
+		s.mu.Lock()
+		s.running = false
+		close(s.events)
+		s.mu.Unlock()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case err := <-s.sub.Err():
+			if err != nil {
+				fmt.Printf("source: subscription error: %v\n", err)
+			}
+			return
+
+		case header, ok := <-headers:
+			if !ok {
+				return
+			}
+
+			// Fetch logs for this block
+			logs, err := s.client.GetBlockLogs(ctx, header.Number)
+			if err != nil {
+				fmt.Printf("source: failed to get logs for block %d: %v\n", header.Number.Uint64(), err)
+				continue
+			}
+
+			fmt.Printf("[Block %d] %d logs\n", header.Number.Uint64(), len(logs))
+
+			// Convert each log to event
+			for _, log := range logs {
+				if log.Removed {
+					continue
+				}
+
+				event := adapter.ToEvent(log, s.chainID)
+
+				select {
+				case s.events <- event:
+				case <-ctx.Done():
+					return
+				default:
+					fmt.Printf("source: event channel full, dropping event at block %d\n", event.BlockNumber)
+				}
+			}
+		}
+	}
 }
 
 // processLogs converts raw logs to events and sends them to the output channel.

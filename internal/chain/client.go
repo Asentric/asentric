@@ -198,6 +198,32 @@ func (c *Client) LatestBlockNumber(ctx context.Context) (uint64, error) {
 	return c.eth.BlockNumber(ctx)
 }
 
+// SubscribeNewHead subscribes to new block headers.
+// This is supported by more RPC providers than SubscribeFilterLogs.
+func (c *Client) SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
+	return c.eth.SubscribeNewHead(ctx, ch)
+}
+
+// GetBlockLogs fetches all logs for a specific block.
+func (c *Client) GetBlockLogs(ctx context.Context, blockNumber *big.Int) ([]RawLog, error) {
+	query := ethereum.FilterQuery{
+		FromBlock: blockNumber,
+		ToBlock:   blockNumber,
+	}
+
+	logs, err := c.eth.FilterLogs(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("chain: filter logs failed: %w", err)
+	}
+
+	rawLogs := make([]RawLog, len(logs))
+	for i, log := range logs {
+		rawLogs[i] = FromEthLog(&log)
+	}
+
+	return rawLogs, nil
+}
+
 // Close closes the client connection.
 func (c *Client) Close() {
 	if c.eth != nil {
