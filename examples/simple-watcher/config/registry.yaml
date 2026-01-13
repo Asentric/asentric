@@ -1,0 +1,7 @@
+# Contract Registry for Simple Watcher Demo
+# Target: MockUSDC on Base Sepolia
+
+targets:
+  - address: "0xc309D45d4119487b30205784efF9abACF20872c0"
+    name: "MockUSDC"
+    abi_path: "examples/simple-watcher/abi/mockusdc.json"

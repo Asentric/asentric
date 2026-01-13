@@ -1,0 +1,32 @@
+# Simple Watcher Demo Configuration
+# Target: Base Sepolia Testnet - MockUSDC Monitoring
+
+version: "1.0"
+
+chain:
+  id: 84532
+  name: "Base Sepolia"
+  rpcUrl: "https://base-sepolia.g.alchemy.com/v2/gt2eopGlYc8HVhpNVU7kGLuv1ScwingU"
+  rpcWs: "wss://base-sepolia.g.alchemy.com/v2/gt2eopGlYc8HVhpNVU7kGLuv1ScwingU"
+
+source:
+  type: "websocket"
+  url: "wss://base-sepolia.g.alchemy.com/v2/gt2eopGlYc8HVhpNVU7kGLuv1ScwingU"
+
+sink:
+  type: "console"
+  url: ""
+
+queue:
+  type: "memory"
+  url: ""
+
+abi:
+  registryPath: "examples/simple-watcher/config/registry.yaml"
+
+debug: true
+
+# Target Contract: MockUSDC
+# Address: 0xc309D45d4119487b30205784efF9abACF20872c0
+# Functions monitored: mint (0x40c10f19)
+# Events monitored: Transfer
