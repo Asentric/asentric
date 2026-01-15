@@ -16,10 +16,10 @@ type LargeTransferRule struct {
 }
 
 // NewLargeTransferRule creates a new LargeTransferRule.
-// Default threshold: 1000 tokens (assuming 18 decimals).
+// Default threshold: 1 token (assuming 18 decimals) - low for demo visibility.
 func NewLargeTransferRule() *LargeTransferRule {
 	threshold := new(big.Int)
-	threshold.SetString("1000000000000000000000", 10) // 1000 * 10^18
+	threshold.SetString("1000000000000000000", 10) // 1 * 10^18 (1 token)
 	return &LargeTransferRule{
 		Threshold: threshold,
 	}

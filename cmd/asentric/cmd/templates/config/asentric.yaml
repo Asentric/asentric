@@ -4,26 +4,25 @@
 
 version: "1.0"
 
-# Chain Configuration
-# Popular testnets:
-#   - Base Sepolia: id=84532, wss://base-sepolia.g.alchemy.com/v2/YOUR_KEY
-#   - Mantle Sepolia: id=5003, wss://rpc.sepolia.mantle.xyz/ws
-#   - Sepolia: id=11155111, wss://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
+# Chain Configuration - Mantle Sepolia (default)
+# Other testnets:
+#   - Base Sepolia: id=84532, wss://base-sepolia.drpc.org
+#   - Ethereum Sepolia: id=11155111, wss://eth-sepolia.drpc.org
 chain:
-  id: 84532                                             # Base Sepolia
-  name: "Base Sepolia"
-  rpcUrl: "https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
-  rpcWs: "wss://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
+  id: 5003
+  name: "Mantle Sepolia"
+  rpcUrl: "https://rpc.sepolia.mantle.xyz"
+  rpcWs: "wss://mantle-sepolia.drpc.org"
 
 # Event Source Configuration
 source:
-  type: "websocket"                                     # Options: websocket, memory
-  url: "wss://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
+  type: "websocket"
+  url: "wss://mantle-sepolia.drpc.org"
 
 # Alert Sink Configuration
 sink:
-  type: "console"                                       # Options: console, webhook
-  url: ""                                               # Webhook URL (if type=webhook)
+  type: "console"                             # Options: console, webhook
+  url: ""                                     # Webhook URL (if type=webhook)
 
 # Queue Configuration (MVP: memory only)
 queue:
@@ -36,3 +35,4 @@ abi:
 
 # Debug Mode
 debug: true
+

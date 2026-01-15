@@ -4,17 +4,20 @@
 
 version: "1.0"
 
-# Chain Configuration
+# Chain Configuration - Mantle Sepolia (default)
+# Change this for other networks:
+#   - Base Sepolia: id=84532, wss://base-sepolia.drpc.org
+#   - Ethereum Sepolia: id=11155111, wss://eth-sepolia.drpc.org
 chain:
-  id: 5003                                    # Mantle Sepolia
+  id: 5003
   name: "Mantle Sepolia"
-  rpcUrl: "https://rpc.sepolia.mantle.xyz"    # HTTP RPC (optional)
-  rpcWs: "wss://rpc.sepolia.mantle.xyz/ws"    # WebSocket RPC (required)
+  rpcUrl: "https://rpc.sepolia.mantle.xyz"
+  rpcWs: "wss://mantle-sepolia.drpc.org"
 
 # Event Source Configuration
 source:
-  type: "websocket"                           # Options: websocket, memory
-  url: "wss://rpc.sepolia.mantle.xyz/ws"
+  type: "websocket"
+  url: "wss://mantle-sepolia.drpc.org"
 
 # Alert Sink Configuration
 sink:
@@ -32,3 +35,4 @@ abi:
 
 # Debug Mode
 debug: true
+
