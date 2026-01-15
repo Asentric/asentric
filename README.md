@@ -146,80 +146,83 @@ The SDK provides the **core detection logic**, while external systems handle:
 
 ### Prerequisites
 
-- Go 1.21 or higher
-- Redis 7+ (required)
-- WebSocket RPC endpoint (Alchemy, Infura, etc.)
+- Go 1.22 or higher
 
-### 1. Setup Redis
-
-```bash
-docker run -d -p 6379:6379 --name redis redis:7-alpine
-```
-
-### 2. Install CLI
+### 1. Install CLI
 
 ```bash
 go install github.com/asentric/asentric@latest
 ```
 
-### 3. Initialize Project
+### 2. Initialize Project
 
 ```bash
-asentric init my-protocol-monitor
-cd my-protocol-monitor
+asentric init my-watcher
+cd my-watcher
 go mod tidy
 ```
 
-This generates:
+This generates a ready-to-run project:
 
 ```
-my-protocol-monitor/
+my-watcher/
 ├── config/
-│   ├── asentric.yaml      # Runtime & engine config
-│   └── registry.yaml      # Target monitoring list
+│   ├── asentric.yaml      # Runtime config (Mantle Sepolia by default)
+│   └── registry.yaml      # Target contracts to monitor
 ├── rules/
-│   └── example_rule.go    # Custom rules
-├── abi/
-│   └── .gitkeep
+│   └── example_rule.go    # Example detection rule
+├── abi/                    # Contract ABI files
 ├── cmd/
 │   └── watcher/
-│       └── main.go
+│       └── main.go         # Entry point
 ├── go.mod
 └── README.md
 ```
 
-### 4. Configure
+### 3. Default Configuration
+
+The generated project comes pre-configured for **Mantle Sepolia**:
 
 **config/asentric.yaml:**
 ```yaml
+version: "1.0"
+
 chain:
-  rpc_ws: "wss://rpc.mantle.xyz/ws"
-  name: "Mantle"
+  id: 5003
+  name: "Mantle Sepolia"
+  rpcUrl: "https://rpc.sepolia.mantle.xyz"
+  rpcWs: "wss://mantle-sepolia.drpc.org"
 
-redis:
-  addr: "localhost:6379"
+source:
+  type: "websocket"
+  url: "wss://mantle-sepolia.drpc.org"
 
-webhook:
-  url: "https://your-webhook.com/alerts"
+sink:
+  type: "console"      # or "webhook" for production
+  url: ""              # webhook URL if type=webhook
+
+debug: true
 ```
 
 **config/registry.yaml:**
 ```yaml
 targets:
-  - address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
-    name: "Uniswap V3 Router"
-    abi_path: "abi/uniswap_v3_router.json"
+  - address: "0xYourContractAddress"
+    name: "My Token"
+    abi_path: "abi/erc20.json"
 ```
 
-### 5. Write Custom Rules
+### 4. Write Custom Rules
+
+The generated project includes an example rule. Here's how rules work:
 
 ```go
-// rules/large_transfer.go
+// rules/example_rule.go
 package rules
 
 import (
-    "math/big"
     "github.com/asentric/asentric/pkg/asentric"
+    "github.com/asentric/asentric/pkg/utils"
 )
 
 type LargeTransferRule struct {
@@ -227,58 +230,56 @@ type LargeTransferRule struct {
 }
 
 func (r *LargeTransferRule) Name() string {
-    return "large_transfer_detection"
+    return "large-transfer"
+}
+
+func (r *LargeTransferRule) Severity() asentric.Severity {
+    return asentric.SeverityHigh
 }
 
 func (r *LargeTransferRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
-    tx := ctx.Tx()
-    
-    if tx.Value().Cmp(r.Threshold) > 0 {
-        return asentric.NewAlert(
-            r.Name(),
-            asentric.SeverityHigh,
-            "Large Transfer Detected",
-            "Transaction value exceeds threshold",
-        ).WithMetadata("value", tx.Value().String()).
-          WithMetadata("threshold", r.Threshold.String()), nil
+    for _, log := range ctx.Logs() {
+        if log.Event.Name == "Transfer" {
+            value := utils.GetFieldBigInt(log.Event.Fields, "value")
+            from := utils.GetFieldString(log.Event.Fields, "from")
+            
+            if value.Cmp(r.Threshold) > 0 {
+                isMint := utils.IsZeroAddress(from)
+                title := "Large Transfer Detected"
+                if isMint {
+                    title = "🎉 Token MINT Detected"
+                }
+                
+                return asentric.NewAlert(r.Name(), title, r.Severity()).
+                    WithMetadata("value", value.String()).
+                    WithMetadata("isMint", isMint), nil
+            }
+        }
     }
-    
     return nil, nil
 }
 ```
 
-### 6. Run
-
-```go
-// cmd/watcher/main.go
-package main
-
-import (
-    "context"
-    "log"
-    "math/big"
-    
-    "github.com/asentric/asentric/pkg/asentric"
-    "my-project/rules"
-)
-
-func main() {
-    config, _ := asentric.LoadConfig("config/")
-    
-    engine := asentric.NewEngine()
-    engine.RegisterRule(&rules.LargeTransferRule{
-        Threshold: big.NewInt(1e18), // 1 ETH
-    })
-    
-    runtime := asentric.NewRuntime(config, engine)
-    if err := runtime.Start(context.Background()); err != nil {
-        log.Fatal(err)
-    }
-}
-```
+### 5. Run
 
 ```bash
 go run cmd/watcher/main.go
+```
+
+**Expected Output:**
+```
+===========================================
+  my-watcher - Asentric Watcher
+===========================================
+✓ Rules registered
+Connecting to Mantle Sepolia...
+✓ Runtime ready
+-------------------------------------------
+Chain:  Mantle Sepolia (ID: 5003)
+Source: websocket
+Sink:   console
+-------------------------------------------
+Listening for events... (Press Ctrl+C to stop)
 ```
 
 > **📖 Full Guide:** [docs/developer-overview.md](docs/developer-overview.md)  
@@ -286,18 +287,17 @@ go run cmd/watcher/main.go
 
 ---
 
-## Filosofi Desain
+## Design Philosophy
 
-Asentric dibangun dengan prinsip berikut:
+Asentric is built with these principles:
 
-* **YAML untuk konfigurasi, bukan logic** — Config hanya untuk setup engine & target list
-* **Rules adalah code, bukan config** — Semua logic deteksi ditulis dalam Go
-* **Engine deterministic & stateless** — Same input selalu menghasilkan same output
-* **Runtime bertanggung jawab atas side-effect** — RPC, database, alert delivery
-* **Developer bebas menentukan kompleksitas rules** — Dari simple threshold hingga ML integration
-* **Redis required** (seperti Ponder.sh butuh Postgres) — Untuk message queue & state management
-* **Database optional** (untuk save events/logs) — Developer choice
-* **1 project = 1 chain** (chain agnostic, tapi fokus 1 chain)
+* **YAML for configuration, not logic** — Config only for engine setup & target list
+* **Rules are code, not config** — All detection logic written in Go
+* **Deterministic & stateless engine** — Same input always produces same output
+* **Runtime handles side-effects** — RPC, database, alert delivery
+* **Developer controls complexity** — From simple threshold to ML integration
+* **Zero external dependencies** — No Redis, no database required for basic usage
+* **1 project = 1 chain** — Chain agnostic, but focused on one chain per project
 
 Pendekatan ini membuat Asentric:
 * Mudah dipelajari
@@ -344,33 +344,29 @@ func TestLargeSwapRule_TriggersOnLargeValue(t *testing.T) {
 
 ## Infrastructure Requirements
 
-### Required: Redis (Setup Awal)
+### Minimal Setup (Default)
 
-**Like Ponder.sh requires Postgres, Asentric requires Redis for:**
-- ✅ Message queue (watcher → processor)
-- ✅ State management (processed blocks)
-- ✅ Worker coordination (multi-worker)
-- ✅ Alert queue (processor → alert handler)
+The SDK works out-of-the-box with **zero external dependencies**:
 
-**Setup:**
-```bash
-docker run -d -p 6379:6379 --name redis redis:7-alpine
-```
+- ✅ WebSocket RPC endpoint (free from dRPC, Infura, Alchemy)
+- ✅ Console sink for development
+- ✅ In-memory queue
 
-### Optional: Database (Save Events/Logs)
+### Production Setup (Optional)
 
-**You can choose a database for:**
-- ⚠️ Saving events/transactions/logs
-- ⚠️ Historical data storage
-- ⚠️ Analytics & reporting
+For production deployments, you may want:
 
-**Options:**
-- PostgreSQL (relational)
-- MongoDB (document)
-- InfluxDB (time-series)
-- ClickHouse (analytics)
+| Component | Purpose | When Needed |
+|-----------|---------|-------------|
+| **Webhook Backend** | Receive alerts, store in database | Production alerting |
+| **PostgreSQL** | Store transactions, historical data | Analytics & reporting |
+| **Redis** | Message queue, state management | Multi-worker setup |
 
-**Lihat detail:** [docs/developer-overview.md](docs/developer-overview.md#1-setup-infrastructure--instalasi)
+**Supported Chains (Default: Mantle Sepolia):**
+- Mantle Sepolia (Chain ID: 5003)
+- Base Sepolia (Chain ID: 84532)
+- Ethereum Sepolia (Chain ID: 11155111)
+- Any EVM-compatible chain
 
 ---
 
@@ -501,28 +497,18 @@ asentric/
 
 | Aspect | Ponder.sh | Asentric |
 |--------|-----------|----------|
-| **Repository** | 1 repo (monorepo) | ✅ 1 repo (monorepo) |
+| **Focus** | Indexing & data | Security & monitoring |
 | **Framework** | ✅ Core framework | ✅ Core framework |
 | **CLI** | ✅ CLI tools | ✅ CLI tools |
-| **Examples** | ✅ Examples | ✅ Examples |
-| **Runtime** | Managed (Ponder) | Self-hosted (developer) |
-| **Required Infrastructure** | Postgres (setup awal) | Redis (setup awal) |
-| **Optional Infrastructure** | Database untuk data | Database untuk events/logs |
-| **Deployment** | Push to Ponder | Self-hosted |
+| **Runtime** | Managed (Ponder Cloud) | Self-hosted |
+| **Required Infrastructure** | Postgres | None (console sink) |
+| **Default Network** | Ethereum | Mantle Sepolia |
+| **Alert System** | ❌ | ✅ Webhook/Console |
 | **Open Source** | ✅ | ✅ |
 
-**Similarities:**
-- ✅ 1 repo (monorepo)
-- ✅ Framework + CLI + Examples
-- ✅ Developer experience focus
-- ✅ Required infrastructure untuk setup awal
-- ✅ Optional database untuk data storage
-
-**Differences:**
-- ⚠️ Ponder.sh: Managed infrastructure
-- ⚠️ Asentric: Self-hosted (developer choice)
-- ⚠️ Ponder.sh: Postgres required (state management)
-- ⚠️ Asentric: Redis required (message queue & state management)
+**Key Differences:**
+- **Ponder.sh**: Indexing-focused, requires Postgres, managed deployment option
+- **Asentric**: Security-focused, zero dependencies, fully self-hosted
 
 ---
 
