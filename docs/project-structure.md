@@ -1,34 +1,23 @@
-# Asentric – Final Project Structure (v1)
+# Project Structure
 
-> **🔒 Lihat MVP Spec:** [SPEC.md](SPEC.md) - **SINGLE SOURCE OF TRUTH** untuk hackathon
-
-Dokumen ini mendefinisikan **struktur folder & file final** untuk seluruh ekosistem Asentric.
-Struktur ini adalah **versi jadi (authoritative)** dan menjadi acuan implementasi untuk seluruh tim.
-
-**Jika terjadi konflik dengan [SPEC.md](SPEC.md), SPEC.md yang benar.**
-
-Tujuan utama struktur ini:
-
-* Boundary jelas antara **Engine**, **Runtime**, dan **Infrastructure**
-* SDK tetap **pure & deterministic**
-* Runtime bebas berevolusi dan scalable
-* Mudah dipahami oleh contributor baru
+This document defines the final folder and file structure for the Asentric SDK.
 
 ---
 
-## 1. High-Level Repository Layout
+## Repository Layout
 
 ```
-asentric/
-│
-├── pkg/asentric/              # PUBLIC SDK (Stable API)
-├── internal/                  # PRIVATE SDK implementation
-├── cmd/                       # CLI & reference runtime
-├── templates/                 # Project scaffolding templates
+asentric-sdk/
+├── pkg/                       # Public SDK API
+│   ├── asentric/              # Core SDK
+│   ├── domain/                # Domain types
+│   ├── runtime/               # Runtime builder
+│   └── utils/                 # Utility functions
+├── internal/                  # Private implementation
+├── cmd/                       # CLI tools
+├── templates/                 # Project scaffolding
 ├── examples/                  # Usage examples
-├── docs/                      # Architecture & DX docs
-├── .github/                   # CI / GitHub config
-│
+├── docs/                      # Documentation
 ├── go.mod
 ├── go.sum
 ├── LICENSE
@@ -37,263 +26,181 @@ asentric/
 
 ---
 
-## 2. Public SDK – `pkg/`
+## Public SDK - `pkg/`
 
-**Ini adalah kontrak resmi SDK.**
-Semua developer eksternal **hanya boleh** bergantung ke folder ini.
+The public API that external developers depend on.
 
-### 2.1 Core SDK (`pkg/asentric/`)
+### Core SDK (`pkg/asentric/`)
 
 ```
 pkg/asentric/
-├── engine.go        # Engine struct & implementation
+├── engine.go        # Engine struct and execution
 ├── rule.go          # Rule interface
 ├── context.go       # Context interface
-├── alert.go         # Alert & Severity model
+├── alert.go         # Alert and Severity models
 ├── event.go         # Event model
-├── config.go        # Engine-level config (non-infra)
+├── config.go        # Configuration loading
 ├── errors.go        # Error types
 ├── event_source.go  # EventSource interface
 ├── alert_sink.go    # AlertSink interface
 └── dispatcher.go    # Dispatcher interface
 ```
 
-### 2.2 Domain Types (`pkg/domain/`)
-
-Lightweight, infrastructure-agnostic types untuk public API.
+### Domain Types (`pkg/domain/`)
 
 ```
 pkg/domain/
-├── address.go       # Address (string-based)
-├── hash.go          # Hash (string-based)
+├── address.go       # Address type
+├── hash.go          # Hash type
 ├── chain.go         # ChainID, Chain
 ├── transaction.go   # Transaction struct
 ├── block.go         # Block struct
 ├── log.go           # Log struct
-├── event.go         # Event (decoded)
+├── event.go         # Decoded event
 ├── value.go         # NativeValue, TokenAmount
-├── token.go         # Token metadata
-└── abi.go           # ABIRegistry interface
+└── token.go         # Token metadata
 ```
 
-**Prinsip penting:**
+### Runtime (`pkg/runtime/`)
 
-* ❌ Tidak ada Redis
-* ❌ Tidak ada RPC
-* ❌ Tidak ada goroutine
-* ❌ Tidak ada IO
-* ❌ Tidak ada geth imports
-* ✅ Pure execution only
-* ✅ String-based types untuk ergonomics
+```
+pkg/runtime/
+├── builder.go       # Runtime builder pattern
+└── runtime.go       # Runtime lifecycle
+```
+
+### Utilities (`pkg/utils/`)
+
+```
+pkg/utils/
+├── address.go       # Address utilities
+├── format.go        # Formatting helpers
+└── field.go         # Event field extraction
+```
+
+**Design Principles:**
+
+- No external infrastructure (Redis, databases)
+- No network I/O
+- No goroutines in public API
+- Pure execution only
+- String-based types for ergonomics
 
 ---
 
-## 3. Internal SDK – `internal/`
+## Internal Implementation - `internal/`
 
-Semua di sini **private**, boleh berubah tanpa breaking change.
-**geth types BOLEH digunakan di sini.**
+Private implementation details that may change without notice.
 
 ```
 internal/
-├── chain/                  # Raw chain types (geth-compatible)
-│   ├── types.go            # RawAddress, RawHash, RawTransaction, etc.
-│   └── client.go           # Chain client interface
-│
-├── adapter/                # Conversion layer
-│   ├── converter.go        # chain types → domain types
-│   └── geth.go             # geth types → chain types
-│
-├── runtime/                # Runtime lifecycle
-│   ├── runtime.go          # Runtime struct & event loop
-│   └── shutdown.go         # Graceful shutdown
-│
-├── dispatcher/             # Event dispatching
-│   └── dispatcher.go       # Dispatcher implementation
-│
-├── context/                # Concrete context implementations
-│   └── evm_context.go      # EVM-specific context
-│
-├── abi/                    # ABI decoding helpers
+├── chain/                  # Chain interaction
+│   ├── types.go            # Raw types
+│   └── client.go           # Chain client
+├── adapter/                # Type conversion
+│   └── converter.go        # Chain to domain conversion
+├── source/                 # Event sources
+│   ├── websocket.go        # WebSocket source
+│   └── memory.go           # In-memory source
+├── sink/                   # Alert sinks
+│   ├── console.go          # Console output
+│   ├── webhook.go          # Webhook delivery
+│   └── multi.go            # Multiple sinks
+├── context/                # Context implementations
+│   └── evm_context.go      # EVM context
+├── abi/                    # ABI handling
 │   ├── loader.go           # ABI file loading
-│   └── decoder.go          # Event/method decoding
-│
-└── alert/                  # Alert helpers
-    └── formatter.go        # Alert formatting
+│   └── decoder.go          # Event decoding
+└── dispatcher/             # Event dispatching
+    └── dispatcher.go       # Dispatcher implementation
 ```
-
-**Hybrid Architecture:**
-
-* ✅ **geth types ALLOWED** di `internal/chain/` dan `internal/adapter/`
-* ✅ Conversion layer maintains boundary
-* ❌ geth types TIDAK BOLEH di `pkg/`
 
 ---
 
-## 4. CLI & Reference Runtime – `cmd/`
-
-### 4.1 CLI Tool
+## CLI Tools - `cmd/`
 
 ```
 cmd/asentric/
 ├── main.go
-├── init.go        # asentric init
-├── replay.go      # offline deterministic replay
-├── version.go
-└── internal/
-    └── templates.go
+└── cmd/
+    ├── root.go          # Root command
+    ├── init.go          # Project scaffolding
+    ├── version.go       # Version info
+    └── templates/       # Embedded templates
 ```
 
-**CLI adalah developer tool, bukan runtime.**
+**Purpose:** Developer tools for project initialization and testing. Not a runtime.
 
 ---
 
-### 4.2 Reference Runtime (Example)
+## Templates - `templates/`
 
-Ini **contoh runtime produksi**, bukan bagian dari SDK core.
-
-```
-cmd/runtime-reference/
-├── main.go                 # Entry point runtime
-│
-├── config/
-│   ├── loader.go           # Load yaml config
-│   └── schema.go
-│
-├── ingest/
-│   ├── evm_logs.go         # Subscribe logs
-│   └── blocks.go           # (optional) block stream
-│
-├── pipeline/
-│   ├── dispatcher.go       # Fan-out events
-│   └── worker.go           # Engine workers
-│
-├── state/                  # RUNTIME STATE (Redis here)
-│   ├── store.go            # Interface
-│   ├── redis.go            # Redis impl
-│   └── memory.go           # Dev impl
-│
-├── alert/
-│   ├── webhook.go
-│   ├── telegram.go
-│   └── dispatcher.go
-│
-└── runtime.go               # Glue code
-```
-
-**Di sinilah Redis hidup.**
-
----
-
-## 5. Templates – `templates/`
-
-Digunakan oleh `asentric init`.
+Used by `asentric init` to scaffold new projects.
 
 ```
 templates/project/
 ├── config/
-│   ├── asentric.yaml      # Runtime & engine config
-│   └── registry.yaml      # What to monitor
-│
+│   ├── asentric.yaml      # Runtime configuration
+│   └── registry.yaml      # Target contracts
 ├── rules/
-│   └── example_rule.go
-│
+│   └── example_rule.go    # Example detection rule
 ├── abi/
 │   └── .gitkeep
-│
 ├── cmd/
 │   └── watcher/
-│       └── main.go
-│
+│       └── main.go        # Entry point
 ├── go.mod.tmpl
 └── README.md.tmpl
 ```
 
 ---
 
-## 6. Examples – `examples/`
+## Examples - `examples/`
+
+Reference implementations for common use cases.
 
 ```
 examples/
-├── simple-watcher/
-├── custom-rules/
-├── multi-chain/
-└── advanced-replay/
+├── simple-watcher/        # Basic watcher example
+├── webhook-integration/   # Webhook backend integration
+└── custom-rules/          # Advanced rule examples
 ```
-
-Digunakan sebagai referensi, **bukan production**.
 
 ---
 
-## 7. Documentation – `docs/`
+## Documentation - `docs/`
 
 ```
 docs/
-├── SPEC.md                  # ⭐ MVP Specification (SINGLE SOURCE OF TRUTH)
-├── developer-overview.md    # Alur end-to-end developer
-├── architecture.md          # Core philosophy & boundaries
-├── sdk-api.md               # Public API reference
-└── project-structure.md     # This file - Final structure
+├── QUICK-START.md         # 5-minute quick start
+├── developer-overview.md  # Complete developer guide
+├── architecture.md        # System architecture
+├── sdk-api.md             # API reference
+├── project-structure.md   # This file
+└── SPEC.md                # MVP specification
 ```
 
 ---
 
-## 8. Boundary Summary (WAJIB DIPATUHI)
+## Layer Boundaries
 
-| Layer   | Redis | RPC | State      | Deterministic |
-| ------- | ----- | --- | ---------- | ------------- |
-| Engine  | ❌     | ❌   | ❌          | ✅             |
-| Rule    | ❌     | ❌   | ❌          | ✅             |
-| Runtime | ✅     | ✅   | Ephemeral  | ❌             |
-| Backend | ✅     | ✅   | Persistent | ❌             |
+| Layer | Infrastructure | State | Deterministic |
+|-------|----------------|-------|---------------|
+| Engine | None | None | Yes |
+| Rules | None | None | Yes |
+| Runtime | WebSocket, HTTP | Ephemeral | No |
 
-**Prinsip:**
+**Principles:**
 
-* **Engine & Rules:** Pure, deterministic, no infrastructure
-* **Runtime:** Infrastructure-aware, handles Redis, RPC, state
-* **Backend:** Persistent storage, API, alert delivery
-
----
-
-## 9. Key Principles
-
-### 9.1 Public SDK (`pkg/asentric/`)
-
-* ✅ **Stable API** - Backward compatible, semver-managed
-* ✅ **Pure execution** - No Redis, RPC, IO, goroutines
-* ✅ **Deterministic** - Same input → same output
-* ✅ **Chain-agnostic** - Works with any EVM chain
-
-### 9.2 Internal SDK (`internal/`)
-
-* ✅ **Private** - No external imports allowed
-* ✅ **Free to change** - No stability guarantees
-* ✅ **Implementation details** - ABI helpers, context implementations
-
-### 9.3 Runtime (`cmd/runtime-reference/`)
-
-* ✅ **Example only** - Not required, just reference
-* ✅ **Infrastructure-aware** - Redis, RPC, state management
-* ✅ **Scalable** - Worker pools, message queues
-* ✅ **Developer choice** - Self-hosted, custom implementation
-
----
-
-## 10. Final Note
-
-Struktur ini:
-
-* Sudah **final untuk v1**
-* Cukup untuk implementasi engine + runtime
-* Tidak perlu diubah kecuali ada kebutuhan besar
-
-👉 **Tim boleh mulai implementasi sekarang tanpa ragu.**
+- **Engine and Rules:** Pure, deterministic, no infrastructure dependencies
+- **Runtime:** Infrastructure-aware, handles connections and delivery
+- **Public API:** Stable, backward compatible
 
 ---
 
 ## Related Documentation
 
-* **[SPEC.md](SPEC.md)** - MVP specification (authoritative)
-* **[developer-overview.md](developer-overview.md)** - Alur end-to-end developer
-* **[architecture.md](architecture.md)** - Core philosophy & boundaries
-* **[sdk-api.md](sdk-api.md)** - Public API reference
-
+- [Quick Start](QUICK-START.md)
+- [Developer Overview](developer-overview.md)
+- [Architecture](architecture.md)
+- [SDK API Reference](sdk-api.md)

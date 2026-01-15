@@ -1,57 +1,52 @@
-# Asentric SDK – Developer Overview
+# Asentric SDK - Developer Overview
 
-> **🔒 Lihat MVP Spec:** [SPEC.md](SPEC.md) - **SINGLE SOURCE OF TRUTH** untuk hackathon
-
-Dokumen ini menjelaskan **alur end-to-end penggunaan Asentric SDK** dari sudut pandang developer. Tujuannya adalah memberikan gambaran besar (big picture) tentang bagaimana Asentric digunakan, tanpa masuk ke detail teknis implementasi.
-
-Asentric dirancang dengan filosofi **developer experience seperti Ponder.sh**: sederhana untuk memulai, fleksibel untuk use case kompleks, dan bersih secara arsitektur.
-
-**Jika terjadi konflik dengan [SPEC.md](SPEC.md), SPEC.md yang benar.**
+This document provides an end-to-end overview of using Asentric SDK from a developer perspective.
 
 ---
 
-## Tujuan Asentric
+## Table of Contents
 
-Asentric adalah SDK untuk **real-time smart contract security monitoring** yang memungkinkan developer:
-
-* Mendefinisikan **apa yang dimonitor** melalui konfigurasi
-* Menulis **logic deteksi sendiri** melalui custom rules
-* Menjalankan engine secara lokal atau di runtime mana pun
-* Menghasilkan alert yang bersifat semantik dan deterministik
-
-Asentric **bukan SaaS**, dan **bukan rule-engine berbasis YAML**. Asentric adalah **SDK + runtime pattern**.
-
----
-
-## Gambaran Besar Alur Developer
-
-Secara ringkas, alur penggunaan Asentric adalah:
-
-1. **Setup Redis** (required - seperti Ponder.sh butuh Postgres)
-2. **Install & inisialisasi project**
-3. **Konfigurasi engine & target monitoring** (YAML)
-4. **Menulis custom rules** (Go)
-5. **Menjalankan runtime watcher**
-6. **Menghasilkan alert**
-
-Alur ini sengaja dibuat linear dan mudah dipahami.
+- [Purpose](#purpose)
+- [Developer Flow](#developer-flow)
+- [Installation](#installation)
+- [Project Structure](#project-structure)
+- [Configuration](#configuration)
+- [Writing Rules](#writing-rules)
+- [Running the Watcher](#running-the-watcher)
+- [Testing](#testing)
+- [Design Philosophy](#design-philosophy)
 
 ---
 
-## 1. Setup Infrastructure & Instalasi
+## Purpose
 
-### Setup Redis Server (Required)
+Asentric SDK is a framework for real-time smart contract security monitoring that enables developers to:
 
-Seperti Ponder.sh memerlukan Postgres untuk setup awal, Asentric memerlukan Redis server untuk message queue dan state management:
+- Define monitoring targets via configuration
+- Write custom detection logic in Go
+- Run the engine locally or in any runtime environment
+- Generate semantic, deterministic alerts
 
-```bash
-docker run -d -p 6379:6379 --name redis redis:7-alpine
-```
+Asentric is not a SaaS platform or YAML-based rule engine. It is an SDK with a runtime pattern.
 
-**Catatan:** Framework yang handle Redis client connection. Developer hanya perlu:
-- Setup Redis server (docker)
-- Konfigurasi di `runtime.yaml`
-- Framework otomatis connect ke Redis berdasarkan config
+---
+
+## Developer Flow
+
+1. Install CLI
+2. Initialize project
+3. Configure targets (YAML)
+4. Write custom rules (Go)
+5. Run watcher
+6. Receive alerts
+
+---
+
+## Installation
+
+### Prerequisites
+
+- Go 1.22 or higher
 
 ### Install CLI
 
@@ -59,125 +54,94 @@ docker run -d -p 6379:6379 --name redis redis:7-alpine
 go install github.com/asentric/asentric@latest
 ```
 
-### Inisialisasi Project
-
-Developer memulai dengan membuat project baru:
+### Initialize Project
 
 ```bash
-asentric init my-protocol-monitor
-cd my-protocol-monitor
+asentric init my-watcher
+cd my-watcher
+go mod tidy
 ```
-
-Perintah init akan menghasilkan **struktur project standar** yang siap digunakan.
-
-Tujuan tahap ini adalah **zero-friction onboarding**.
 
 ---
 
-## 2. Struktur Project
-
-Struktur project hasil inisialisasi:
+## Project Structure
 
 ```
-my-protocol-monitor/
+my-watcher/
 ├── config/
-│   ├── asentric.yaml      # Runtime & engine configuration
-│   └── registry.yaml      # Target monitoring list (1 chain per project)
+│   ├── asentric.yaml      # Runtime configuration
+│   └── registry.yaml      # Target contracts
 ├── rules/
-│   └── example_rule.go    # Custom rules
-├── abi/
-│   └── .gitkeep           # Contract ABIs go here
+│   └── example_rule.go    # Detection rules
+├── abi/                   # Contract ABI files
 ├── cmd/
 │   └── watcher/
-│       └── main.go        # Runtime entry point
+│       └── main.go        # Entry point
 ├── go.mod
 └── README.md
 ```
 
-Struktur ini mencerminkan pemisahan concern yang jelas:
+**Separation of Concerns:**
 
-* **config/** → deklaratif (apa & bagaimana dijalankan)
-* **rules/** → imperatif (logika deteksi)
-* **cmd/** → runtime & orchestration
+| Directory | Purpose |
+|-----------|---------|
+| `config/` | Declarative configuration |
+| `rules/` | Imperative detection logic |
+| `cmd/` | Runtime orchestration |
 
 ---
 
-## 3. Konfigurasi (YAML)
-
-Asentric menggunakan **2 file konfigurasi**:
+## Configuration
 
 ### asentric.yaml
 
-Digunakan untuk mengatur **runtime & engine configuration**:
-
-* Chain RPC endpoint (WebSocket)
-* Redis configuration
-* Webhook URL
-* Engine options
+Runtime and engine configuration:
 
 ```yaml
-# config/asentric.yaml
+version: "1.0"
 
-# Chain configuration
 chain:
-  rpc_ws: "wss://rpc.mantle.xyz/ws"
-  name: "Mantle"           # Network name for alerts
-  chain_id: 5000           # Optional, auto-detect if not provided
+  id: 5003
+  name: "Mantle Sepolia"
+  rpcUrl: "https://rpc.sepolia.mantle.xyz"
+  rpcWs: "wss://mantle-sepolia.drpc.org"
 
-# Redis configuration (required)
-redis:
-  addr: "localhost:6379"
+source:
+  type: "websocket"
+  url: "wss://mantle-sepolia.drpc.org"
 
-# Webhook configuration (required)
-webhook:
-  url: "https://your-webhook.com/alerts"
+sink:
+  type: "console"      # Options: console, webhook
+  url: ""              # Required for webhook
 
-# Engine configuration (optional)
-engine:
-  fail_fast: false
+debug: true
 ```
-
----
 
 ### registry.yaml
 
-Digunakan untuk mendefinisikan **apa yang dimonitor**:
-
-* Smart contract addresses (1 chain per project)
-* Contract names
-* ABI file paths
+Target contracts to monitor:
 
 ```yaml
-# config/registry.yaml
 targets:
-  - address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
-    name: "Uniswap V3 Router"
-    abi_path: "abi/uniswap_v3_router.json"
-    
-  - address: "0x..."
-    name: "My Protocol Vault"
-    abi_path: "abi/vault.json"
+  - address: "0xYourContractAddress"
+    name: "Token Contract"
+    abi_path: "abi/erc20.json"
 ```
 
 ---
 
-## 4. Custom Rules (Go Code)
+## Writing Rules
 
-Semua logic deteksi ditulis sebagai **custom rules dalam Go**:
-
-* Setiap rule mengimplementasikan interface SDK
-* Rules bersifat **pure logic**
-* Tidak melakukan I/O, network call, atau side-effect
-
-### Contoh Rule
+Rules implement the `asentric.Rule` interface:
 
 ```go
-// rules/large_transfer.go
 package rules
 
 import (
     "math/big"
+    
     "github.com/asentric/asentric/pkg/asentric"
+    "github.com/asentric/asentric/pkg/utils"
 )
 
 type LargeTransferRule struct {
@@ -189,65 +153,56 @@ func NewLargeTransferRule(threshold *big.Int) *LargeTransferRule {
 }
 
 func (r *LargeTransferRule) Name() string {
-    return "large_transfer_detection"
+    return "large-transfer"
+}
+
+func (r *LargeTransferRule) Severity() asentric.Severity {
+    return asentric.SeverityHigh
 }
 
 func (r *LargeTransferRule) Evaluate(ctx asentric.Context) (*asentric.Alert, error) {
-    tx := ctx.Tx()
-    
-    // tx.Value() returns *big.Int for easy comparison
-    if tx.Value().Cmp(r.Threshold) > 0 {
-        return asentric.NewAlert(
-            r.Name(),
-            asentric.SeverityHigh,
-            "Large Transfer Detected",
-            "Transaction value exceeds threshold",
-        ).WithMetadata("value", tx.Value().String()).
-          WithMetadata("threshold", r.Threshold.String()).
-          WithMetadata("from", tx.From.String()).
-          WithMetadata("to", tx.To.String()), nil
+    for _, log := range ctx.Logs() {
+        if log.Event.Name == "Transfer" {
+            value := utils.GetFieldBigInt(log.Event.Fields, "value")
+            from := utils.GetFieldString(log.Event.Fields, "from")
+            
+            if value != nil && value.Cmp(r.Threshold) > 0 {
+                isMint := utils.IsZeroAddress(from)
+                title := "Large Transfer Detected"
+                if isMint {
+                    title = "Token Mint Detected"
+                }
+                
+                return asentric.NewAlert(r.Name(), title, r.Severity()).
+                    WithMetadata("value", value.String()).
+                    WithMetadata("isMint", isMint), nil
+            }
+        }
     }
-    
     return nil, nil
 }
 ```
 
-Contoh rule lainnya:
+### Rule Characteristics
 
-* Upgrade / proxy change detection
-* Suspicious behavior detection
-* ML-based anomaly detection (custom ML integration)
+- **Pure functions** - No side effects
+- **No I/O** - No network calls or file access
+- **Deterministic** - Same input produces same output
+- **Testable** - Easy to unit test
 
-Pendekatan ini memberikan fleksibilitas maksimal dan mencegah keterbatasan rule berbasis config.
-
----
-
-## 5. Rule Registration
-
-Rules diregistrasikan ke engine sebelum runtime dijalankan:
+### Registering Rules
 
 ```go
 // cmd/watcher/main.go
 engine := asentric.NewEngine()
 engine.RegisterRule(rules.NewLargeTransferRule(big.NewInt(1e18)))
-engine.RegisterRule(&rules.UpgradeDetectionRule{})
 ```
-
-Secara konsep:
-
-> Engine mengetahui kumpulan rules yang harus dijalankan.
 
 ---
 
-## 6. Runtime
+## Running the Watcher
 
-Runtime adalah **entry point aplikasi**, berada di:
-
-```
-cmd/watcher/main.go
-```
-
-### Developer Experience Target
+### Entry Point
 
 ```go
 // cmd/watcher/main.go
@@ -256,148 +211,107 @@ package main
 import (
     "context"
     "log"
-    "math/big"
     
     "github.com/asentric/asentric/pkg/asentric"
-    "my-project/rules"
+    "github.com/asentric/asentric/pkg/runtime"
+    "my-watcher/rules"
 )
 
 func main() {
-    // 1. Load configuration (from config/ directory)
-    config, err := asentric.LoadConfig("config/")
+    // Load configuration
+    cfg, err := asentric.LoadConfig("config/asentric.yaml")
     if err != nil {
         log.Fatal(err)
     }
     
-    // 2. Create engine and register rules
+    // Create engine and register rules
     engine := asentric.NewEngine()
-    engine.RegisterRule(rules.NewLargeTransferRule(big.NewInt(1e18)))
-    engine.RegisterRule(&rules.UpgradeDetectionRule{})
+    engine.RegisterRule(rules.NewLargeTransferRule())
     
-    // 3. Create runtime and start
-    runtime := asentric.NewRuntime(config, engine)
+    // Build and start runtime
+    ctx := context.Background()
+    rt, err := runtime.NewBuilder(cfg, engine).
+        WithWebSocketSource(ctx).
+        WithSinkFromConfig().
+        Build()
+    if err != nil {
+        log.Fatal(err)
+    }
     
-    // 4. Run (blocks until SIGINT/SIGTERM)
-    if err := runtime.Start(context.Background()); err != nil {
+    // Run (blocks until interrupt)
+    if err := rt.Start(ctx); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-### Framework Handles
-
-- ✅ WebSocket subscription to chain
-- ✅ Redis queue management
-- ✅ Context building from events
-- ✅ Engine evaluation
-- ✅ Webhook alert delivery
-- ✅ Graceful shutdown (SIGINT/SIGTERM)
-
-### Developer Provides
-
-- ✅ Configuration files
-- ✅ Custom rules
-- ✅ ABI files
-
----
-
-## 7. Menjalankan Aplikasi
-
-Developer menjalankan watcher menggunakan:
+### Run Command
 
 ```bash
 go run cmd/watcher/main.go
 ```
 
-Setelah dijalankan:
+### Expected Output
 
-* Runtime mulai memonitor blockchain (1 chain per project)
-* Engine mengeksekusi rules terhadap transaksi
-* Alert dihasilkan ketika rule terpenuhi
-* Alert dikirim ke channel yang dikonfigurasi (runtime responsibility)
+```
+===========================================
+  my-watcher - Asentric Watcher
+===========================================
+[OK] Rules registered
+Connecting to Mantle Sepolia...
+[OK] Runtime ready
+-------------------------------------------
+Chain:  Mantle Sepolia (ID: 5003)
+Source: websocket
+Sink:   console
+-------------------------------------------
+Listening for events... (Press Ctrl+C to stop)
+```
 
 ---
 
-## 8. Testing & Replay
+## Testing
 
-Developer dapat test rules secara offline tanpa infrastructure:
+Rules are pure functions, making them easy to test:
+
+```go
+func TestLargeTransferRule(t *testing.T) {
+    ctx := mockContextWithTransfer(big.NewInt(2e18))
+    rule := NewLargeTransferRule(big.NewInt(1e18))
+    
+    alert, err := rule.Evaluate(ctx)
+    
+    require.NoError(t, err)
+    require.NotNil(t, alert)
+    assert.Equal(t, "large-transfer", alert.Rule)
+}
+```
+
+### Replay Mode
+
+Test rules offline with recorded transactions:
 
 ```bash
 asentric replay --fixture fixtures/example_tx.json
 ```
 
-Replay mode:
-
-* **No External Dependencies** — Runs completely offline
-* **Deterministic** — Same input always produces same output
-* **Safe Iteration** — Test rule changes without affecting production
-
 ---
 
-## Filosofi Desain
+## Design Philosophy
 
-Asentric dibangun dengan prinsip berikut:
-
-* **YAML untuk konfigurasi, bukan logic**
-* **Rules adalah code, bukan config**
-* **Engine deterministic & stateless**
-* **Runtime bertanggung jawab atas side-effect**
-* **Developer bebas menentukan kompleksitas rules**
-* **Redis required** (seperti Ponder.sh butuh Postgres)
-* **Database optional** (untuk save events/logs)
-* **1 project = 1 chain** (chain agnostic, tapi fokus 1 chain)
-
-Pendekatan ini membuat Asentric:
-
-* Mudah dipelajari
-* Mudah dites
-* Mudah di-debug
-* Tidak cepat mentok untuk use case kompleks
-
----
-
-## Perbandingan dengan Ponder.sh
-
-| Aspek | Ponder.sh | Asentric |
-|-------|-----------|----------|
-| **Setup** | Postgres required | Redis required |
-| **Configuration** | YAML | YAML (config + registry + runtime) |
-| **Logic** | TypeScript | Go (custom rules) |
-| **Testing** | Local replay | Local replay |
-| **Deployment** | Push to Ponder | Self-hosted |
-| **Infrastructure** | Managed | Developer choice |
-
-**Kesamaan:**
-- ✅ Setup minimal dengan infrastructure required
-- ✅ YAML untuk konfigurasi
-- ✅ Custom logic (TypeScript vs Go)
-- ✅ Local testing/replay
-- ✅ Developer experience focus
-
-**Perbedaan:**
-- ⚠️ Ponder.sh: Managed infrastructure
-- ⚠️ Asentric: Self-hosted (developer choice)
-
----
-
-## Penutup
-
-Dengan flow ini, developer dapat:
-
-* Setup monitoring hanya dengan konfigurasi minimal
-* Menulis logic deteksi sesuai kebutuhan protocol
-* Menjalankan engine secara lokal atau terdistribusi
-* Test rules secara offline tanpa infrastructure
-
-Dokumen ini menjadi **acuan utama** untuk memahami bagaimana Asentric digunakan dari awal sampai berjalan.
+| Principle | Description |
+|-----------|-------------|
+| **YAML for configuration** | Configuration is declarative, not logic |
+| **Rules are code** | Detection logic written in Go, not config |
+| **Deterministic engine** | Same input always produces same output |
+| **Runtime handles I/O** | Side effects managed by runtime, not rules |
+| **Zero dependencies** | No external infrastructure required for basic usage |
+| **Single chain per project** | Focused monitoring, chain agnostic |
 
 ---
 
 ## Next Steps
 
-Setelah memahami alur developer, lihat dokumentasi detail:
-
-* **[architecture.md](architecture.md)** - Deep dive arsitektur
-* **[sdk-api.md](sdk-api.md)** - Complete API reference
-* **[project-structure.md](project-structure.md)** - Final project structure
-
+- [Architecture](architecture.md) - System architecture deep dive
+- [SDK API Reference](sdk-api.md) - Complete API documentation
+- [Testing Guide](TESTING-GUIDE.md) - Testing strategies
