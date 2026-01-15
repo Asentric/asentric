@@ -24,11 +24,13 @@ import (
 	"github.com/asentric/asentric/pkg/asentric"
 	"github.com/asentric/asentric/pkg/domain"
 	"github.com/asentric/asentric/pkg/rules"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 var (
 	// Version information - set via ldflags at build time
-	Version   = "0.1.0"
+	Version   = "0.2.1"
 	GitCommit = "dev"
 	BuildDate = "unknown"
 )
@@ -152,6 +154,12 @@ func run(configPath string) error {
 
 // registerRules registers the default detection rules.
 func registerRules(engine *asentric.Engine) error {
+	// Default ERC20 rule - listens to all ERC20 Transfer/Mint/Burn events with value > 100
+	// This is the main default rule for demo
+	if err := engine.RegisterRule(rules.NewERC20DefaultRule()); err != nil {
+		return err
+	}
+
 	// Large transfer detection
 	if err := engine.RegisterRule(rules.NewLargeTransferRule()); err != nil {
 		return err
@@ -177,6 +185,19 @@ func registerRules(engine *asentric.Engine) error {
 // buildEventSource creates the appropriate EventSource based on config.
 func buildEventSource(ctx context.Context, cfg *asentric.RuntimeConfig) (asentric.EventSource, domain.ABIRegistry, error) {
 	abiRegistry := abiPkg.NewRegistry()
+
+	// Register standard ERC20 ABI for all contracts
+	// For demo, we'll register it dynamically when we encounter Transfer events
+	// For now, we register it for known contracts
+	// Note: In production, you might want to register ABIs from config or discover them dynamically
+	loader := abiPkg.NewLoader(abiRegistry)
+	err := loader.LoadAndRegisterString(
+		common.HexToAddress(MockUSDCAddress),
+		abiPkg.StandardERC20ABI,
+	)
+	if err == nil {
+		log.Println("Registered standard ERC20 ABI for default detection")
+	}
 
 	switch cfg.Source.Type {
 	case "websocket":

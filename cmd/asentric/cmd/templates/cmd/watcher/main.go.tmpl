@@ -27,12 +27,20 @@ func main() {
 	// Create engine and register rules
 	engine := asentric.NewEngine()
 
-	// Register your rules here
-	if err := engine.RegisterRule(rules.NewLargeTransferRule()); err != nil {
-		log.Fatalf("Failed to register rule: %v", err)
+	// Register default ERC20 rule - listens to all ERC20 Transfer/Mint/Burn events with value > 100
+	// This rule automatically detects Transfer events from any ERC20 contract
+	if err := engine.RegisterRule(rules.NewERC20DefaultRule()); err != nil {
+		log.Fatalf("Failed to register ERC20 default rule: %v", err)
 	}
 
+	// Register your custom rules here
+	// Example: Large transfer detection
+	// if err := engine.RegisterRule(rules.NewLargeTransferRule()); err != nil {
+	// 	log.Fatalf("Failed to register rule: %v", err)
+	// }
+
 	log.Println("✓ Rules registered")
+	log.Println("  - erc20-default: Detects all ERC20 Transfer/Mint/Burn events (value > 100)")
 
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

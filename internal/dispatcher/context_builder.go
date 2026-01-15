@@ -1,6 +1,10 @@
 package dispatcher
 
 import (
+	"github.com/ethereum/go-ethereum/common"
+
+	abiPkg "github.com/asentric/asentric/internal/abi"
+	"github.com/asentric/asentric/internal/chain"
 	"github.com/asentric/asentric/internal/context"
 	"github.com/asentric/asentric/pkg/asentric"
 	"github.com/asentric/asentric/pkg/domain"
@@ -9,7 +13,8 @@ import (
 // DefaultContextBuilder is the standard implementation of ContextBuilder.
 type DefaultContextBuilder struct {
 	chainID     domain.ChainID   
-	abiRegistry domain.ABIRegistry // optional 
+	abiRegistry domain.ABIRegistry // optional
+	decoder     *abiPkg.Decoder    // decoder for ABI decoding
 }
 
 // ContextBuilderConfig holds configuration for DefaultContextBuilder.
@@ -20,10 +25,20 @@ type ContextBuilderConfig struct {
 
 // NewDefaultContextBuilder creates a new DefaultContextBuilder.
 func NewDefaultContextBuilder(cfg ContextBuilderConfig) *DefaultContextBuilder {
-	return &DefaultContextBuilder{
+	builder := &DefaultContextBuilder{
 		chainID:     cfg.ChainID,
 		abiRegistry: cfg.ABIRegistry,
 	}
+	
+	// Create decoder if we have an ABI registry
+	if cfg.ABIRegistry != nil {
+		// Try to cast to *abiPkg.Registry to get decoder
+		if reg, ok := cfg.ABIRegistry.(*abiPkg.Registry); ok {
+			builder.decoder = abiPkg.NewDecoder(reg)
+		}
+	}
+	
+	return builder
 }
 
 // Build converts an Event into a Context for Engine evaluation.
@@ -136,6 +151,7 @@ func (b *DefaultContextBuilder) extractBlock(event asentric.Event) domain.Block 
 }
 
 // Extracts log data from the Event payload.
+// If ABI registry is available, attempts to decode events using ABI decoder.
 func (b *DefaultContextBuilder) extractLogs(event asentric.Event) []domain.Log {
 	// Handle nil or empty payload
 	if event.Payload == nil {
@@ -163,12 +179,23 @@ func (b *DefaultContextBuilder) extractLogs(event asentric.Event) []domain.Log {
 			continue // Skip invalid log entries
 		}
 		
-		// Extract event data (decoded event info)
+		// Extract event data (decoded event info if already present)
 		eventData := domain.Event{}
 		if evtMap, ok := logMap["event"].(map[string]interface{}); ok {
 			eventData.Name = getStringValue(evtMap, "name")
 			if fields, ok := evtMap["fields"].(map[string]interface{}); ok {
 				eventData.Fields = fields
+			}
+		}
+		
+		// If event is not decoded and we have a decoder, try to decode it
+		if eventData.Name == "" && b.decoder != nil {
+			// Convert logMap to chain.RawLog for decoding
+			if rawLog := b.logMapToRawLog(logMap, event); rawLog != nil {
+				decoded := b.decoder.Decode(*rawLog)
+				if decoded.Event != nil {
+					eventData = b.decoder.ToDomainEvent(decoded.Event)
+				}
 			}
 		}
 		
@@ -187,6 +214,55 @@ func (b *DefaultContextBuilder) extractLogs(event asentric.Event) []domain.Log {
 	}
 	
 	return logs
+}
+
+// logMapToRawLog converts a log map to chain.RawLog for ABI decoding.
+func (b *DefaultContextBuilder) logMapToRawLog(logMap map[string]interface{}, event asentric.Event) *chain.RawLog {
+	addressStr := getStringValue(logMap, "address")
+	if addressStr == "" {
+		return nil
+	}
+	
+	address := common.HexToAddress(addressStr)
+	
+	// Extract topics
+	topicsInterface, ok := logMap["topics"].([]interface{})
+	if !ok {
+		return nil
+	}
+	
+	topics := make([]common.Hash, 0, len(topicsInterface))
+	for _, t := range topicsInterface {
+		if topicStr, ok := t.(string); ok {
+			topics = append(topics, common.HexToHash(topicStr))
+		}
+	}
+	
+	// Extract data
+	dataStr := getStringValue(logMap, "data")
+	var data []byte
+	if dataStr != "" {
+		data = common.FromHex(dataStr)
+	}
+	
+	// Extract block hash
+	blockHashStr := getStringValue(logMap, "blockHash")
+	blockHash := common.Hash{}
+	if blockHashStr != "" {
+		blockHash = common.HexToHash(blockHashStr)
+	}
+	
+	return &chain.RawLog{
+		Address:     address,
+		Topics:      topics,
+		Data:        data,
+		BlockNumber: event.BlockNumber,
+		BlockHash:   blockHash,
+		TxHash:      common.HexToHash(event.TxHash),
+		TxIndex:     int(getUint64Value(logMap, "transactionIndex")),
+		LogIndex:    int(getUint64Value(logMap, "logIndex")),
+		Removed:     getBoolValue(logMap, "removed"),
+	}
 }
 
 // Helper functions for safe type extraction from map[string]interface{}

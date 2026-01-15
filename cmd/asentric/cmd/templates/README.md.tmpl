@@ -10,9 +10,23 @@ A blockchain security watcher built with [Asentric SDK](https://github.com/asent
 # Install dependencies
 go mod tidy
 
-# Run watcher
+# Run watcher (default: listens to all ERC20 events with value > 100)
 go run cmd/watcher/main.go
 ```
+
+### What's Included
+
+By default, this watcher includes:
+
+- **ERC20 Default Rule**: Automatically detects all ERC20 Transfer/Mint/Burn events with value > 100 tokens
+- **Console Logging**: Events are printed to console for demo purposes
+- **Webhook Support**: Configure webhook URL in `config/asentric.yaml` to receive alerts
+
+The default rule will:
+- Listen to **all ERC20 contracts** on the configured chain
+- Detect **Transfer**, **Mint** (from zero address), and **Burn** (to zero address) events
+- Filter events with value **> 100 tokens** (assuming 18 decimals by default)
+- Print detected events to console with full details
 
 ---
 
@@ -103,6 +117,15 @@ Register rules in `cmd/watcher/main.go`:
 ```go
 engine.RegisterRule(&rules.MyRule{})
 ```
+
+### Built-in Rules
+
+The SDK provides several built-in rules you can use:
+
+- `rules.NewERC20DefaultRule()` - Detects all ERC20 Transfer/Mint/Burn events (value > 100)
+- `rules.NewERC20TransferRule(cfg)` - Detects Transfer events from a specific ERC20 contract
+- `rules.NewLargeTransferRule()` - Detects large native token transfers
+- `rules.NewWhaleAlertRule()` - Detects very large native token transfers
 
 ---
 
