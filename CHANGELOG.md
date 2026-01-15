@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-01-15
+
+### Fixed
+- 🐛 **CLI Install Path** - Fixed install command to use correct path: `github.com/asentric/asentric/cmd/asentric@latest`
+- 🐛 **Type Mismatch** - Fixed type conversion in context_builder.go (int to uint for TxIndex and LogIndex)
+- 🐛 **Template Version** - Updated template to use v0.2.2 by default
+
+### Changed
+- 🔄 Updated all documentation with correct install path
+- 🔄 Template now generates projects with v0.2.2 SDK version
+
+---
+
 ## [0.2.1] - 2026-01-15
 
 ### Added

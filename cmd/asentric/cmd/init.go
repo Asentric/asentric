@@ -70,7 +70,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	data := TemplateData{
 		ProjectName: projectName,
 		ModulePath:  projectName,
-		SDKVersion:  "v0.2.0",
+		SDKVersion:  "v0.2.2",
 	}
 
 	// Copy template files

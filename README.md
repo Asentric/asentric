@@ -60,7 +60,7 @@ Asentric is not a SaaS platform or YAML-based rule engine. It is an SDK with a r
 ### Installation
 
 ```bash
-go install github.com/asentric/asentric@latest
+go install github.com/asentric/asentric/cmd/asentric@latest
 ```
 
 ### Create a New Project

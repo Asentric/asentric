@@ -259,8 +259,8 @@ func (b *DefaultContextBuilder) logMapToRawLog(logMap map[string]interface{}, ev
 		BlockNumber: event.BlockNumber,
 		BlockHash:   blockHash,
 		TxHash:      common.HexToHash(event.TxHash),
-		TxIndex:     int(getUint64Value(logMap, "transactionIndex")),
-		LogIndex:    int(getUint64Value(logMap, "logIndex")),
+		TxIndex:     uint(getUint64Value(logMap, "transactionIndex")),
+		LogIndex:    uint(getUint64Value(logMap, "logIndex")),
 		Removed:     getBoolValue(logMap, "removed"),
 	}
 }
