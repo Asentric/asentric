@@ -18,6 +18,7 @@ var templateFS embed.FS
 type TemplateData struct {
 	ProjectName string
 	ModulePath  string
+	SDKVersion  string // SDK version to use in go.mod
 }
 
 var initCmd = &cobra.Command{
@@ -69,6 +70,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	data := TemplateData{
 		ProjectName: projectName,
 		ModulePath:  projectName,
+		SDKVersion:  "v0.1.1",
 	}
 
 	// Copy template files
